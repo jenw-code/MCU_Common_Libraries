@@ -70,6 +70,8 @@ public:
 	static constexpr int16_t DATA_XY_OVERFLOW = -4096; // X/Y data register value when the axis overflowed
 	static constexpr int16_t DATA_Z_OVERFLOW = -16384; // Z data register value when the axis overflowed
 
+	static constexpr int16_t MAGNETIC_FIELD_OVERFLOW = -32768; // Compensated value when the axis overflowed or the data is invalid
+
 private:
 	static constexpr uint8_t IC_ID_VALUE = 0x32; // Value returned from the BMM150 when reading its chip ID
 
@@ -91,6 +93,24 @@ private:
 	static constexpr uint8_t REG_HIGH_THRESHOLD = 0x50;		// High-Threshold interrupt threshold setting
 	static constexpr uint8_t REG_REPXY = 0x51;				// Number of repetitions for x/y-axis (nXY = 1 + 2 x REPXY)
 	static constexpr uint8_t REG_REPZ = 0x52;				// Number of repetitions for z-axis (nZ = 1 + REPZ)
+
+	// Trim registers (not documented in the datasheet, layout from the Bosch Sensortec BMM150 API)
+	static constexpr uint8_t REG_DIG_X1 = 0x5D;		  // dig_x1 (int8)
+	static constexpr uint8_t REG_DIG_Y1 = 0x5E;		  // dig_y1 (int8)
+	static constexpr uint8_t REG_DIG_Z4_LSB = 0x62;	  // dig_z4 LSB (int16)
+	static constexpr uint8_t REG_DIG_Z4_MSB = 0x63;	  // dig_z4 MSB
+	static constexpr uint8_t REG_DIG_X2 = 0x64;		  // dig_x2 (int8)
+	static constexpr uint8_t REG_DIG_Y2 = 0x65;		  // dig_y2 (int8)
+	static constexpr uint8_t REG_DIG_Z2_LSB = 0x68;	  // dig_z2 LSB (int16)
+	static constexpr uint8_t REG_DIG_Z2_MSB = 0x69;	  // dig_z2 MSB
+	static constexpr uint8_t REG_DIG_Z1_LSB = 0x6A;	  // dig_z1 LSB (uint16)
+	static constexpr uint8_t REG_DIG_Z1_MSB = 0x6B;	  // dig_z1 MSB
+	static constexpr uint8_t REG_DIG_XYZ1_LSB = 0x6C; // dig_xyz1 LSB (uint16)
+	static constexpr uint8_t REG_DIG_XYZ1_MSB = 0x6D; // dig_xyz1 MSB (bit 7 not part of value)
+	static constexpr uint8_t REG_DIG_Z3_LSB = 0x6E;	  // dig_z3 LSB (int16)
+	static constexpr uint8_t REG_DIG_Z3_MSB = 0x6F;	  // dig_z3 MSB
+	static constexpr uint8_t REG_DIG_XY2 = 0x70;	  // dig_xy2 (int8)
+	static constexpr uint8_t REG_DIG_XY1 = 0x71;	  // dig_xy1 (uint8)
 
 	// Data X LSB bits
 	static constexpr uint8_t DATA_X_LSB_DATA_X_SHIFT = 3;									// DATA X [4:0] starts at bit 3
@@ -185,13 +205,60 @@ private:
 	static constexpr uint8_t INTERRUPT_AXES_BIT_INTERRUPT_PIN_EN = (1 << 6);   // Interrupt Pin En: 1 = Interrupt status mapped to INT pin, 0 = Disabled (default)
 	static constexpr uint8_t INTERRUPT_AXES_BIT_DATA_READY_PIN_EN = (1 << 7);  // Data Ready Pin En: 1 = Data ready mapped to DRDY pin, 0 = Disabled (default)
 
-	static constexpr uint8_t START_UP_TIME_MILLIS = 3; // Time from suspend to sleep mode after setting power control bit
+	// dig_xyz1 MSB bits
+	static constexpr uint8_t DIG_XYZ1_MSB_BITS_DIG_XYZ1 = 0b1111111; // dig_xyz1 [14:8]
+
+	static constexpr uint8_t START_UP_TIME_MILLIS = 3;	 // Time from suspend to sleep mode after setting power control bit
+	static constexpr uint8_t SOFT_RESET_TIME_MILLIS = 1; // Time for soft reset to complete
+	static constexpr uint8_t NORMAL_SELF_TEST_TIMEOUT_MILLIS = 10; // Time allowed for the normal self-test to complete
+
+	// Compensation constants (Bosch Sensortec fixed point compensation)
+	// Note: Other literal values in the compensation are undocumented fixed point scaling steps
+	static constexpr uint16_t COMPENSATION_RESISTANCE_SCALE = 16384;			 // Resistance ratio scale (2^14)
+	static constexpr int32_t COMPENSATION_XY_OFFSET = 0x100000;					 // X/Y offset (256 at 4096 scale)
+	static constexpr int16_t COMPENSATION_XY2_GAIN_OFFSET = 160;				 // dig_x2 / dig_y2 gain offset
+	static constexpr int16_t COMPENSATION_XY1_SCALE = 8;						 // dig_x1 / dig_y1 scale
+	static constexpr int32_t COMPENSATION_Z_SCALE = 65536;						 // Z dig_z1 term scale (2^16)
+	static constexpr int32_t COMPENSATION_Z_ROUNDING = COMPENSATION_Z_SCALE / 2; // Z dig_z1 term rounding to nearest
+
+	struct TrimData final
+	{
+		int8_t digX1 = 0;
+		int8_t digY1 = 0;
+		int8_t digX2 = 0;
+		int8_t digY2 = 0;
+		uint16_t digZ1 = 0;
+		int16_t digZ2 = 0;
+		int16_t digZ3 = 0;
+		int16_t digZ4 = 0;
+		uint8_t digXY1 = 0;
+		int8_t digXY2 = 0;
+		uint16_t digXYZ1 = 0;
+	};
+
+	TrimData _trimData;
 
 	/// @brief Return 8 bit chip ID
 	uint8_t getChipID() const
 	{
 		return readReg(REG_CHIP_ID);
 	}
+
+	/// @brief Read the factory trim data used for compensation into _trimData
+	/// @return True if successful
+	bool populateTrimData();
+
+	/// @brief Compensate raw x-axis data (Bosch Sensortec fixed point compensation)
+	/// @return Compensated x-axis magnetic field (µT), or MAGNETIC_FIELD_OVERFLOW
+	int16_t compensateX(const int16_t rawX, const uint16_t rhall) const;
+
+	/// @brief Compensate raw y-axis data (Bosch Sensortec fixed point compensation)
+	/// @return Compensated y-axis magnetic field (µT), or MAGNETIC_FIELD_OVERFLOW
+	int16_t compensateY(const int16_t rawY, const uint16_t rhall) const;
+
+	/// @brief Compensate raw z-axis data (Bosch Sensortec fixed point compensation)
+	/// @return Compensated z-axis magnetic field (µT), or MAGNETIC_FIELD_OVERFLOW
+	int16_t compensateZ(const int16_t rawZ, const uint16_t rhall) const;
 
 	/// @brief Return true if the interrupt axes include the x-axis
 	static constexpr bool interruptAxesIncludeX(const InterruptAxes axes)
@@ -264,6 +331,16 @@ public:
 	/// @brief Trigger a single measurement (forced mode). The device returns to sleep mode once complete
 	/// @return True if triggered. False if suspended, in normal mode, or a measurement is still in progress
 	bool forceMeasurement();
+
+	/// @brief Soft reset. All registers except the trim and power control registers are reset to default, and the device is left in sleep mode
+	/// @brief Note: Ignored in suspend mode
+	/// @return True if successful
+	bool softReset();
+
+	/// @brief Run the normal self-test (checks x, y and z signal paths and connectivity)
+	/// @brief Note: The device is left in sleep mode
+	/// @return True if communication succeeded and all axes passed
+	bool normalSelfTest();
 
 	/// @brief Set output data rate (used in normal mode)
 	/// @return True if successful
@@ -437,4 +514,16 @@ public:
 	/// @param rhall Hall resistance (14-bit unsigned), used for temperature compensation
 	/// @return True if successful
 	bool readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const;
+
+	/// @brief Read compensated magnetic field data (temperature and sensitivity compensated)
+	/// @param x X-axis magnetic field (µT). MAGNETIC_FIELD_OVERFLOW on overflow
+	/// @param y Y-axis magnetic field (µT). MAGNETIC_FIELD_OVERFLOW on overflow
+	/// @param z Z-axis magnetic field (µT). MAGNETIC_FIELD_OVERFLOW on overflow
+	/// @return True if successful
+	bool readData(int16_t &x, int16_t &y, int16_t &z) const;
+
+	/// @brief Calculate compass heading from the x and y magnetic field (0 degrees along the y-axis, increasing towards the x-axis)
+	/// @param degrees Heading in degrees (0 to 359)
+	/// @return True if successful. False if x or y overflowed, or there is no horizontal field
+	bool readHeading(uint16_t &degrees) const;
 };
