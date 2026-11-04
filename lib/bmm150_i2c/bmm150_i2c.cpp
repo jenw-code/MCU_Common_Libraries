@@ -58,6 +58,51 @@ bool BMM150_I2C::setDataOverrun(const bool enable)
 	return writeReg(REG_INTERRUPT_SETTINGS, &value);
 }
 
+bool BMM150_I2C::getInterruptStatus(InterruptStatus &status) const
+{
+	uint8_t value = 0;
+	if (!readReg(REG_INTERRUPT_STATUS, &value, 1))
+		return false;
+
+	status.lowX = ((value & INTERRUPT_STATUS_BIT_LOW_INT_X) != 0);
+	status.lowY = ((value & INTERRUPT_STATUS_BIT_LOW_INT_Y) != 0);
+	status.lowZ = ((value & INTERRUPT_STATUS_BIT_LOW_INT_Z) != 0);
+	status.highX = ((value & INTERRUPT_STATUS_BIT_HIGH_INT_X) != 0);
+	status.highY = ((value & INTERRUPT_STATUS_BIT_HIGH_INT_Y) != 0);
+	status.highZ = ((value & INTERRUPT_STATUS_BIT_HIGH_INT_Z) != 0);
+	status.overflow = ((value & INTERRUPT_STATUS_BIT_OVERFLOW) != 0);
+	status.dataOverrun = ((value & INTERRUPT_STATUS_BIT_DATA_OVERRUN) != 0);
+
+	return true;
+}
+
+bool BMM150_I2C::readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const
+{
+	constexpr uint8_t DATA_SIZE = (REG_RHALL_MSB - REG_DATA_X_LSB) + 1;
+	uint8_t data[DATA_SIZE];
+	if (!readReg(REG_DATA_X_LSB, data, DATA_SIZE))
+		return false;
+
+	// Combine MSB and LSB into the upper bits of a 16-bit value, then shift down to sign extend
+	const int16_t dataX = static_cast<int16_t>((data[REG_DATA_X_MSB - REG_DATA_X_LSB] << 8) |
+											   (data[REG_DATA_X_LSB - REG_DATA_X_LSB] & DATA_X_LSB_BITS_DATA_X));
+	x = dataX >> DATA_X_LSB_DATA_X_SHIFT;
+
+	const int16_t dataY = static_cast<int16_t>((data[REG_DATA_Y_MSB - REG_DATA_X_LSB] << 8) |
+											   (data[REG_DATA_Y_LSB - REG_DATA_X_LSB] & DATA_Y_LSB_BITS_DATA_Y));
+	y = dataY >> DATA_Y_LSB_DATA_Y_SHIFT;
+
+	const int16_t dataZ = static_cast<int16_t>((data[REG_DATA_Z_MSB - REG_DATA_X_LSB] << 8) |
+											   (data[REG_DATA_Z_LSB - REG_DATA_X_LSB] & DATA_Z_LSB_BITS_DATA_Z));
+	z = dataZ >> DATA_Z_LSB_DATA_Z_SHIFT;
+
+	const uint16_t dataRhall = static_cast<uint16_t>((data[REG_RHALL_MSB - REG_DATA_X_LSB] << 8) |
+													 (data[REG_RHALL_LSB - REG_DATA_X_LSB] & RHALL_LSB_BITS_RHALL));
+	rhall = dataRhall >> RHALL_LSB_RHALL_SHIFT;
+
+	return true;
+}
+
 bool BMM150_I2C::setInterruptPin(const bool enable, const bool latched, const bool activeHigh)
 {
 	uint8_t value = 0;

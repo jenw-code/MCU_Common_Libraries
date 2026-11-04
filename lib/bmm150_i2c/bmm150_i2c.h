@@ -55,20 +55,33 @@ public:
 		XYZ = 7
 	};
 
-	// Interrupt status bits (returned by getInterruptStatus)
-	static constexpr uint8_t INTERRUPT_STATUS_BIT_LOW_INT_X = (1 << 0);	   // Low Int X: 1 = X-axis below Low-Threshold
-	static constexpr uint8_t INTERRUPT_STATUS_BIT_LOW_INT_Y = (1 << 1);	   // Low Int Y: 1 = Y-axis below Low-Threshold
-	static constexpr uint8_t INTERRUPT_STATUS_BIT_LOW_INT_Z = (1 << 2);	   // Low Int Z: 1 = Z-axis below Low-Threshold
-	static constexpr uint8_t INTERRUPT_STATUS_BIT_HIGH_INT_X = (1 << 3);   // High Int X: 1 = X-axis above High-Threshold
-	static constexpr uint8_t INTERRUPT_STATUS_BIT_HIGH_INT_Y = (1 << 4);   // High Int Y: 1 = Y-axis above High-Threshold
-	static constexpr uint8_t INTERRUPT_STATUS_BIT_HIGH_INT_Z = (1 << 5);   // High Int Z: 1 = Z-axis above High-Threshold
-	static constexpr uint8_t INTERRUPT_STATUS_BIT_OVERFLOW = (1 << 6);	   // Overflow: 1 = Measurement overflow
-	static constexpr uint8_t INTERRUPT_STATUS_BIT_DATA_OVERRUN = (1 << 7); // Data Overrun: 1 = Data registers updated before previous data read
+	struct InterruptStatus final
+	{
+		bool lowX = false;		  // Low Int X: X-axis below Low-Threshold
+		bool lowY = false;		  // Low Int Y: Y-axis below Low-Threshold
+		bool lowZ = false;		  // Low Int Z: Z-axis below Low-Threshold
+		bool highX = false;		  // High Int X: X-axis above High-Threshold
+		bool highY = false;		  // High Int Y: Y-axis above High-Threshold
+		bool highZ = false;		  // High Int Z: Z-axis above High-Threshold
+		bool overflow = false;	  // Overflow: Measurement overflow
+		bool dataOverrun = false; // Data Overrun: Data registers updated before previous data read
+	};
+
+	static constexpr int16_t DATA_XY_OVERFLOW = -4096; // X/Y data register value when the axis overflowed
+	static constexpr int16_t DATA_Z_OVERFLOW = -16384; // Z data register value when the axis overflowed
 
 private:
 	static constexpr uint8_t IC_ID_VALUE = 0x32; // Value returned from the BMM150 when reading its chip ID
 
 	static constexpr uint8_t REG_CHIP_ID = 0x40;			// Chip ID register (reads 0x00 while in suspend mode)
+	static constexpr uint8_t REG_DATA_X_LSB = 0x42;			// DATA X [4:0] LSB and X-Self-Test
+	static constexpr uint8_t REG_DATA_X_MSB = 0x43;			// DATA X [12:5] MSB
+	static constexpr uint8_t REG_DATA_Y_LSB = 0x44;			// DATA Y [4:0] LSB and Y-Self-Test
+	static constexpr uint8_t REG_DATA_Y_MSB = 0x45;			// DATA Y [12:5] MSB
+	static constexpr uint8_t REG_DATA_Z_LSB = 0x46;			// DATA Z [6:0] LSB and Z-Self-Test
+	static constexpr uint8_t REG_DATA_Z_MSB = 0x47;			// DATA Z [14:7] MSB
+	static constexpr uint8_t REG_RHALL_LSB = 0x48;			// RHALL [5:0] LSB and Data Ready Status
+	static constexpr uint8_t REG_RHALL_MSB = 0x49;			// RHALL [13:6] MSB
 	static constexpr uint8_t REG_INTERRUPT_STATUS = 0x4A;	// Interrupt status register (cleared when read, for latched interrupts)
 	static constexpr uint8_t REG_POWER_CONTROL = 0x4B;		// Power control and soft reset register (only register accessible in suspend mode)
 	static constexpr uint8_t REG_OP_MODE = 0x4C;			// Operation mode, data rate and self test register
@@ -78,6 +91,41 @@ private:
 	static constexpr uint8_t REG_HIGH_THRESHOLD = 0x50;		// High-Threshold interrupt threshold setting
 	static constexpr uint8_t REG_REPXY = 0x51;				// Number of repetitions for x/y-axis (nXY = 1 + 2 x REPXY)
 	static constexpr uint8_t REG_REPZ = 0x52;				// Number of repetitions for z-axis (nZ = 1 + REPZ)
+
+	// Data X LSB bits
+	static constexpr uint8_t DATA_X_LSB_DATA_X_SHIFT = 3;									// DATA X [4:0] starts at bit 3
+	static constexpr uint8_t DATA_X_LSB_BIT_X_SELF_TEST = (1 << 0);							// X-Self-Test: Normal self-test result for x-axis
+	static constexpr uint8_t DATA_X_LSB_BIT_FIXED_1 = (1 << 1);								// Fixed to 0
+	static constexpr uint8_t DATA_X_LSB_BIT_FIXED_2 = (1 << 2);								// Fixed to 0
+	static constexpr uint8_t DATA_X_LSB_BITS_DATA_X = (0b11111 << DATA_X_LSB_DATA_X_SHIFT); // DATA X [4:0]
+
+	// Data Y LSB bits
+	static constexpr uint8_t DATA_Y_LSB_DATA_Y_SHIFT = 3;									// DATA Y [4:0] starts at bit 3
+	static constexpr uint8_t DATA_Y_LSB_BIT_Y_SELF_TEST = (1 << 0);							// Y-Self-Test: Normal self-test result for y-axis
+	static constexpr uint8_t DATA_Y_LSB_BIT_FIXED_1 = (1 << 1);								// Fixed to 0
+	static constexpr uint8_t DATA_Y_LSB_BIT_FIXED_2 = (1 << 2);								// Fixed to 0
+	static constexpr uint8_t DATA_Y_LSB_BITS_DATA_Y = (0b11111 << DATA_Y_LSB_DATA_Y_SHIFT); // DATA Y [4:0]
+
+	// Data Z LSB bits
+	static constexpr uint8_t DATA_Z_LSB_DATA_Z_SHIFT = 1;									  // DATA Z [6:0] starts at bit 1
+	static constexpr uint8_t DATA_Z_LSB_BIT_Z_SELF_TEST = (1 << 0);							  // Z-Self-Test: Normal self-test result for z-axis
+	static constexpr uint8_t DATA_Z_LSB_BITS_DATA_Z = (0b1111111 << DATA_Z_LSB_DATA_Z_SHIFT); // DATA Z [6:0]
+
+	// RHALL LSB bits
+	static constexpr uint8_t RHALL_LSB_RHALL_SHIFT = 2;									 // RHALL [5:0] starts at bit 2
+	static constexpr uint8_t RHALL_LSB_BIT_DATA_READY_STATUS = (1 << 0);				 // Data Ready Status: 1 = Data registers updated and not yet read, 0 = Read (cleared on data register read)
+	static constexpr uint8_t RHALL_LSB_BIT_FIXED_1 = (1 << 1);							 // Fixed to 0
+	static constexpr uint8_t RHALL_LSB_BITS_RHALL = (0b111111 << RHALL_LSB_RHALL_SHIFT); // RHALL [5:0]
+
+	// Interrupt status bits
+	static constexpr uint8_t INTERRUPT_STATUS_BIT_LOW_INT_X = (1 << 0);	   // Low Int X: 1 = X-axis below Low-Threshold
+	static constexpr uint8_t INTERRUPT_STATUS_BIT_LOW_INT_Y = (1 << 1);	   // Low Int Y: 1 = Y-axis below Low-Threshold
+	static constexpr uint8_t INTERRUPT_STATUS_BIT_LOW_INT_Z = (1 << 2);	   // Low Int Z: 1 = Z-axis below Low-Threshold
+	static constexpr uint8_t INTERRUPT_STATUS_BIT_HIGH_INT_X = (1 << 3);   // High Int X: 1 = X-axis above High-Threshold
+	static constexpr uint8_t INTERRUPT_STATUS_BIT_HIGH_INT_Y = (1 << 4);   // High Int Y: 1 = Y-axis above High-Threshold
+	static constexpr uint8_t INTERRUPT_STATUS_BIT_HIGH_INT_Z = (1 << 5);   // High Int Z: 1 = Z-axis above High-Threshold
+	static constexpr uint8_t INTERRUPT_STATUS_BIT_OVERFLOW = (1 << 6);	   // Overflow: 1 = Measurement overflow
+	static constexpr uint8_t INTERRUPT_STATUS_BIT_DATA_OVERRUN = (1 << 7); // Data Overrun: 1 = Data registers updated before previous data read
 
 	// Power control bits
 	static constexpr uint8_t POWER_CONTROL_BIT_POWER_CONTROL = (1 << 0); // Power Control: 1 = Sleep mode, 0 = Suspend mode
@@ -369,9 +417,24 @@ public:
 	bool setDataReadyPin(const bool enable, const bool activeHigh = true);
 
 	/// @brief Read the interrupt status. Reading clears latched interrupts and the INT pin
-	/// @return Interrupt status bits (see INTERRUPT_STATUS_BIT_*)
-	uint8_t getInterruptStatus() const
+	/// @param status Populated with the interrupt status
+	/// @return True if successful
+	bool getInterruptStatus(InterruptStatus &status) const;
+
+	/// @brief Check if new data is available (for polling when the DRDY pin is not used)
+	/// @brief Note: Reading clears the Data Ready Status, so read the data straight after
+	/// @return True if the data registers have been updated and not yet read
+	bool isDataReady() const
 	{
-		return readReg(REG_INTERRUPT_STATUS);
+		uint8_t value = 0;
+		return readReg(REG_RHALL_LSB, &value, 1) && ((value & RHALL_LSB_BIT_DATA_READY_STATUS) != 0);
 	}
+
+	/// @brief Read raw (uncompensated) data from a single burst read, so all values are from the same measurement
+	/// @param x X-axis raw data (13-bit signed). DATA_XY_OVERFLOW on overflow
+	/// @param y Y-axis raw data (13-bit signed). DATA_XY_OVERFLOW on overflow
+	/// @param z Z-axis raw data (15-bit signed). DATA_Z_OVERFLOW on overflow
+	/// @param rhall Hall resistance (14-bit unsigned), used for temperature compensation
+	/// @return True if successful
+	bool readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const;
 };
