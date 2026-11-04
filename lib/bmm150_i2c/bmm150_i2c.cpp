@@ -161,6 +161,49 @@ bool BMM150_I2C::enableDataOverrun(const bool enable)
 	return writeReg(REG_INTERRUPT_SETTINGS, &value);
 }
 
+bool BMM150_I2C::enableInterrupts(const bool enable, const bool latched, const bool activeHigh)
+{
+	uint8_t value = 0;
+	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
+		return false;
+
+	if (enable)
+		value |= INTERRUPT_AXES_BIT_INTERRUPT_PIN_EN; // Interrupt Pin En - set to 1 (enabled)
+	else
+		value &= ~INTERRUPT_AXES_BIT_INTERRUPT_PIN_EN; // Interrupt Pin En - set to 0 (disabled)
+
+	if (latched)
+		value |= INTERRUPT_AXES_BIT_INTERRUPT_LATCH; // Interrupt Latch - set to 1 (latched)
+	else
+		value &= ~INTERRUPT_AXES_BIT_INTERRUPT_LATCH; // Interrupt Latch - set to 0 (non-latched)
+
+	if (activeHigh)
+		value |= INTERRUPT_AXES_BIT_INTERRUPT_POLARITY; // Interrupt Polarity - set to 1 (active high)
+	else
+		value &= ~INTERRUPT_AXES_BIT_INTERRUPT_POLARITY; // Interrupt Polarity - set to 0 (active low)
+
+	return writeReg(REG_INTERRUPT_AXES, &value);
+}
+
+bool BMM150_I2C::enableDataReadyInterrupt(const bool enable, const bool activeHigh)
+{
+	uint8_t value = 0;
+	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
+		return false;
+
+	if (enable)
+		value |= INTERRUPT_AXES_BIT_DATA_READY_PIN_EN; // Data Ready Pin En - set to 1 (enabled)
+	else
+		value &= ~INTERRUPT_AXES_BIT_DATA_READY_PIN_EN; // Data Ready Pin En - set to 0 (disabled)
+
+	if (activeHigh)
+		value |= INTERRUPT_AXES_BIT_DR_POLARITY; // DR Polarity - set to 1 (active high)
+	else
+		value &= ~INTERRUPT_AXES_BIT_DR_POLARITY; // DR Polarity - set to 0 (active low)
+
+	return writeReg(REG_INTERRUPT_AXES, &value);
+}
+
 bool BMM150_I2C::getInterruptStatus(InterruptStatus &status) const
 {
 	uint8_t value = 0;
@@ -202,48 +245,6 @@ bool BMM150_I2C::readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall
 	const uint16_t dataRhall = static_cast<uint16_t>((data[REG_RHALL_MSB - REG_DATA_X_LSB] << 8) |
 													 (data[REG_RHALL_LSB - REG_DATA_X_LSB] & RHALL_LSB_BITS_RHALL));
 	rhall = dataRhall >> RHALL_LSB_RHALL_SHIFT;
-
-	return true;
-}
-
-bool BMM150_I2C::readData(int16_t &x, int16_t &y, int16_t &z) const
-{
-	int16_t rawX = 0;
-	int16_t rawY = 0;
-	int16_t rawZ = 0;
-	uint16_t rhall = 0;
-	if (!readRawData(rawX, rawY, rawZ, rhall))
-		return false;
-
-	x = compensateX(rawX, rhall);
-	y = compensateY(rawY, rhall);
-	z = compensateZ(rawZ, rhall);
-
-	return true;
-}
-
-bool BMM150_I2C::readHeading(uint16_t &degrees) const
-{
-	int16_t x = 0;
-	int16_t y = 0;
-	int16_t z = 0;
-	if (!readData(x, y, z) || (x == MAGNETIC_FIELD_OVERFLOW) || (y == MAGNETIC_FIELD_OVERFLOW))
-		return false;
-
-	const int32_t absX = abs(x);
-	const int32_t absY = abs(y);
-	if ((absX == 0) && (absY == 0))
-		return false; // No horizontal field, heading is undefined
-
-	// atan(r) ≈ 45r + 16r(1 - r) degrees, where r is the smaller axis / larger axis (0 to 1, scaled by 256)
-	const int32_t ratio = (min(absX, absY) * 256) / max(absX, absY);
-	const int32_t octant = ((45 * ratio) + ((16 * ratio * (256 - ratio)) / 256)) / 256;
-	const int32_t quadrant = (absX <= absY) ? octant : (90 - octant);
-
-	if (x >= 0)
-		degrees = static_cast<uint16_t>((y >= 0) ? quadrant : (180 - quadrant));
-	else
-		degrees = static_cast<uint16_t>((y < 0) ? (180 + quadrant) : ((360 - quadrant) % 360));
 
 	return true;
 }
@@ -326,45 +327,44 @@ int16_t BMM150_I2C::compensateZ(const int16_t rawZ, const uint16_t rhall) const
 	return static_cast<int16_t>(processCompZ5 / 16);
 }
 
-bool BMM150_I2C::enableInterrupts(const bool enable, const bool latched, const bool activeHigh)
+bool BMM150_I2C::readData(int16_t &x, int16_t &y, int16_t &z) const
 {
-	uint8_t value = 0;
-	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
+	int16_t rawX = 0;
+	int16_t rawY = 0;
+	int16_t rawZ = 0;
+	uint16_t rhall = 0;
+	if (!readRawData(rawX, rawY, rawZ, rhall))
 		return false;
 
-	if (enable)
-		value |= INTERRUPT_AXES_BIT_INTERRUPT_PIN_EN; // Interrupt Pin En - set to 1 (enabled)
-	else
-		value &= ~INTERRUPT_AXES_BIT_INTERRUPT_PIN_EN; // Interrupt Pin En - set to 0 (disabled)
+	x = compensateX(rawX, rhall);
+	y = compensateY(rawY, rhall);
+	z = compensateZ(rawZ, rhall);
 
-	if (latched)
-		value |= INTERRUPT_AXES_BIT_INTERRUPT_LATCH; // Interrupt Latch - set to 1 (latched)
-	else
-		value &= ~INTERRUPT_AXES_BIT_INTERRUPT_LATCH; // Interrupt Latch - set to 0 (non-latched)
-
-	if (activeHigh)
-		value |= INTERRUPT_AXES_BIT_INTERRUPT_POLARITY; // Interrupt Polarity - set to 1 (active high)
-	else
-		value &= ~INTERRUPT_AXES_BIT_INTERRUPT_POLARITY; // Interrupt Polarity - set to 0 (active low)
-
-	return writeReg(REG_INTERRUPT_AXES, &value);
+	return true;
 }
 
-bool BMM150_I2C::enableDataReadyInterrupt(const bool enable, const bool activeHigh)
+bool BMM150_I2C::readHeading(uint16_t &degrees) const
 {
-	uint8_t value = 0;
-	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
+	int16_t x = 0;
+	int16_t y = 0;
+	int16_t z = 0;
+	if (!readData(x, y, z) || (x == MAGNETIC_FIELD_OVERFLOW) || (y == MAGNETIC_FIELD_OVERFLOW))
 		return false;
 
-	if (enable)
-		value |= INTERRUPT_AXES_BIT_DATA_READY_PIN_EN; // Data Ready Pin En - set to 1 (enabled)
-	else
-		value &= ~INTERRUPT_AXES_BIT_DATA_READY_PIN_EN; // Data Ready Pin En - set to 0 (disabled)
+	const int32_t absX = abs(x);
+	const int32_t absY = abs(y);
+	if ((absX == 0) && (absY == 0))
+		return false; // No horizontal field, heading is undefined
 
-	if (activeHigh)
-		value |= INTERRUPT_AXES_BIT_DR_POLARITY; // DR Polarity - set to 1 (active high)
-	else
-		value &= ~INTERRUPT_AXES_BIT_DR_POLARITY; // DR Polarity - set to 0 (active low)
+	// atan(r) ≈ 45r + 16r(1 - r) degrees, where r is the smaller axis / larger axis (0 to 1, scaled by 256)
+	const int32_t ratio = (min(absX, absY) * 256) / max(absX, absY);
+	const int32_t octant = ((45 * ratio) + ((16 * ratio * (256 - ratio)) / 256)) / 256;
+	const int32_t quadrant = (absX <= absY) ? octant : (90 - octant);
 
-	return writeReg(REG_INTERRUPT_AXES, &value);
+	if (x >= 0)
+		degrees = static_cast<uint16_t>((y >= 0) ? quadrant : (180 - quadrant));
+	else
+		degrees = static_cast<uint16_t>((y < 0) ? (180 + quadrant) : ((360 - quadrant) % 360));
+
+	return true;
 }

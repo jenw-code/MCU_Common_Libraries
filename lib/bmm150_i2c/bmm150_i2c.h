@@ -114,29 +114,31 @@ private:
 	static constexpr uint8_t REG_DIG_XY1 = 0x71;	  // dig_xy1 (uint8)
 
 	// Data X LSB bits
-	static constexpr uint8_t DATA_X_LSB_DATA_X_SHIFT = 3;									// DATA X [4:0] starts at bit 3
-	static constexpr uint8_t DATA_X_LSB_BIT_X_SELF_TEST = (1 << 0);							// X-Self-Test: Normal self-test result for x-axis
-	static constexpr uint8_t DATA_X_LSB_BIT_FIXED_1 = (1 << 1);								// Fixed to 0
-	static constexpr uint8_t DATA_X_LSB_BIT_FIXED_2 = (1 << 2);								// Fixed to 0
-	static constexpr uint8_t DATA_X_LSB_BITS_DATA_X = (0b11111 << DATA_X_LSB_DATA_X_SHIFT); // DATA X [4:0]
+	static constexpr uint8_t DATA_X_LSB_BIT_X_SELF_TEST = (1 << 0); // X-Self-Test: Normal self-test result for x-axis
+	static constexpr uint8_t DATA_X_LSB_BIT_FIXED_1 = (1 << 1);		// Fixed to 0
+	static constexpr uint8_t DATA_X_LSB_BIT_FIXED_2 = (1 << 2);		// Fixed to 0
+	static constexpr uint8_t DATA_X_LSB_BITS_DATA_X = 0b11111000;	// DATA X [4:0]
 
 	// Data Y LSB bits
-	static constexpr uint8_t DATA_Y_LSB_DATA_Y_SHIFT = 3;									// DATA Y [4:0] starts at bit 3
-	static constexpr uint8_t DATA_Y_LSB_BIT_Y_SELF_TEST = (1 << 0);							// Y-Self-Test: Normal self-test result for y-axis
-	static constexpr uint8_t DATA_Y_LSB_BIT_FIXED_1 = (1 << 1);								// Fixed to 0
-	static constexpr uint8_t DATA_Y_LSB_BIT_FIXED_2 = (1 << 2);								// Fixed to 0
-	static constexpr uint8_t DATA_Y_LSB_BITS_DATA_Y = (0b11111 << DATA_Y_LSB_DATA_Y_SHIFT); // DATA Y [4:0]
+	static constexpr uint8_t DATA_Y_LSB_BIT_Y_SELF_TEST = (1 << 0); // Y-Self-Test: Normal self-test result for y-axis
+	static constexpr uint8_t DATA_Y_LSB_BIT_FIXED_1 = (1 << 1);		// Fixed to 0
+	static constexpr uint8_t DATA_Y_LSB_BIT_FIXED_2 = (1 << 2);		// Fixed to 0
+	static constexpr uint8_t DATA_Y_LSB_BITS_DATA_Y = 0b11111000;	// DATA Y [4:0]
 
 	// Data Z LSB bits
-	static constexpr uint8_t DATA_Z_LSB_DATA_Z_SHIFT = 1;									  // DATA Z [6:0] starts at bit 1
-	static constexpr uint8_t DATA_Z_LSB_BIT_Z_SELF_TEST = (1 << 0);							  // Z-Self-Test: Normal self-test result for z-axis
-	static constexpr uint8_t DATA_Z_LSB_BITS_DATA_Z = (0b1111111 << DATA_Z_LSB_DATA_Z_SHIFT); // DATA Z [6:0]
+	static constexpr uint8_t DATA_Z_LSB_BIT_Z_SELF_TEST = (1 << 0); // Z-Self-Test: Normal self-test result for z-axis
+	static constexpr uint8_t DATA_Z_LSB_BITS_DATA_Z = 0b11111110;	// DATA Z [6:0]
 
 	// RHALL LSB bits
-	static constexpr uint8_t RHALL_LSB_RHALL_SHIFT = 2;									 // RHALL [5:0] starts at bit 2
-	static constexpr uint8_t RHALL_LSB_BIT_DATA_READY_STATUS = (1 << 0);				 // Data Ready Status: 1 = Data registers updated and not yet read, 0 = Read (cleared on data register read)
-	static constexpr uint8_t RHALL_LSB_BIT_FIXED_1 = (1 << 1);							 // Fixed to 0
-	static constexpr uint8_t RHALL_LSB_BITS_RHALL = (0b111111 << RHALL_LSB_RHALL_SHIFT); // RHALL [5:0]
+	static constexpr uint8_t RHALL_LSB_BIT_DATA_READY_STATUS = (1 << 0); // Data Ready Status: 1 = Data registers updated and not yet read, 0 = Read (cleared on data register read)
+	static constexpr uint8_t RHALL_LSB_BIT_FIXED_1 = (1 << 1);			 // Fixed to 0
+	static constexpr uint8_t RHALL_LSB_BITS_RHALL = 0b11111100;			 // RHALL [5:0]
+
+	// Data field positions within the LSB registers (used to combine the MSB and LSB registers)
+	static constexpr uint8_t DATA_X_LSB_DATA_X_SHIFT = 3; // DATA X [4:0] starts at bit 3
+	static constexpr uint8_t DATA_Y_LSB_DATA_Y_SHIFT = 3; // DATA Y [4:0] starts at bit 3
+	static constexpr uint8_t DATA_Z_LSB_DATA_Z_SHIFT = 1; // DATA Z [6:0] starts at bit 1
+	static constexpr uint8_t RHALL_LSB_RHALL_SHIFT = 2;	  // RHALL [5:0] starts at bit 2
 
 	// Interrupt status bits
 	static constexpr uint8_t INTERRUPT_STATUS_BIT_LOW_INT_X = (1 << 0);	   // Low Int X: 1 = X-axis below Low-Threshold
@@ -209,8 +211,8 @@ private:
 	// dig_xyz1 MSB bits
 	static constexpr uint8_t DIG_XYZ1_MSB_BITS_DIG_XYZ1 = 0b1111111; // dig_xyz1 [14:8]
 
-	static constexpr uint8_t START_UP_TIME_MILLIS = 3;	 // Time from suspend to sleep mode after setting power control bit
-	static constexpr uint8_t SOFT_RESET_TIME_MILLIS = 1; // Time for soft reset to complete
+	static constexpr uint8_t START_UP_TIME_MILLIS = 3;			   // Time from suspend to sleep mode after setting power control bit
+	static constexpr uint8_t SOFT_RESET_TIME_MILLIS = 1;		   // Time for soft reset to complete
 	static constexpr uint8_t NORMAL_SELF_TEST_TIMEOUT_MILLIS = 10; // Time allowed for the normal self-test to complete
 
 	// Compensation constants (Bosch Sensortec fixed point compensation)
