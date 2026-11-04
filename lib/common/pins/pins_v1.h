@@ -1,0 +1,88 @@
+#pragma once
+
+#include <Arduino.h>
+
+/*
+RP2354B (QFN-80) pinout:
+
+Pin1  = D4
+Pin2  = D5
+Pin3  = D6
+Pin4  = D7
+Pin5  = <IOVDD> - NOT GPIO
+Pin6  = D8
+Pin7  = D9
+Pin8  = D10
+Pin9  = D11
+Pin10 = <DVDD> - NOT GPIO
+Pin11 = D12
+Pin12 = D13
+Pin13 = D14
+Pin14 = D15
+Pin15 = <IOVDD> - NOT GPIO
+Pin16 = D16
+Pin17 = D17
+Pin18 = D18
+Pin19 = D19
+Pin20 = D20
+Pin21 = D21
+Pin22 = D22
+Pin23 = D23
+Pin24 = <IOVDD> - NOT GPIO
+Pin25 = D24
+Pin26 = D25
+Pin27 = D26
+Pin28 = D27
+Pin29 = <IOVDD> - NOT GPIO
+Pin30 = XIN - NOT GPIO
+Pin31 = XOUT - NOT GPIO
+Pin32 = <DVDD> - NOT GPIO
+Pin33 = SWCLK - NOT GPIO
+Pin34 = SWDIO - NOT GPIO
+Pin35 = RUN - NOT GPIO
+Pin36 = D28
+Pin37 = D29
+Pin38 = D30
+Pin39 = D31
+Pin40 = D32
+Pin41 = <IOVDD> - NOT GPIO
+Pin42 = D33
+Pin43 = D34
+Pin44 = D35
+Pin45 = D36
+Pin46 = D37
+Pin47 = D38
+Pin48 = D39
+Pin49 = D40 (A0)
+Pin50 = <IOVDD> - NOT GPIO
+Pin51 = <DVDD> - NOT GPIO
+Pin52 = D41 (A1)
+Pin53 = D42 (A2)
+Pin54 = D43 (A3)
+Pin55 = D44 (A4)
+Pin56 = D45 (A5)
+Pin57 = D46 (A6)
+Pin58 = D47 (A7)
+Pin59 = <ADC_AVDD> - NOT GPIO
+Pin60 = <IOVDD> - NOT GPIO
+Pin61 = <VREG_AVDD> - NOT GPIO
+Pin62 = <VREG_PGND> - NOT GPIO
+Pin63 = VREG_LX - NOT GPIO
+Pin64 = <VREG_VIN> - NOT GPIO
+Pin65 = VREG_FB - NOT GPIO
+Pin66 = USB_DM - NOT GPIO
+Pin67 = USB_DP - NOT GPIO
+Pin68 = <USB_OTP_VDD> - NOT GPIO
+Pin69 = <QSPI_IOVDD> - NOT GPIO
+Pin70 = QSPI_SD3 (PSRAM) - NOT GPIO
+Pin71 = QSPI_SCLK (PSRAM) - NOT GPIO
+Pin72 = QSPI_SD0 (PSRAM) - NOT GPIO
+Pin73 = QSPI_SD2 (PSRAM) - NOT GPIO
+Pin74 = QSPI_SD1 (PSRAM) - NOT GPIO
+Pin75 = QSPI_SS - NOT GPIO
+Pin76 = <IOVDD> - NOT GPIO
+Pin77 = D0
+Pin78 = D1
+Pin79 = D2
+Pin80 = D3
+*/
