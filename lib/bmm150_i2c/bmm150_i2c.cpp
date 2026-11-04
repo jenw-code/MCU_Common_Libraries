@@ -222,13 +222,8 @@ bool BMM150_I2C::getInterruptStatus(InterruptStatus &status) const
 	return true;
 }
 
-bool BMM150_I2C::readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const
+void BMM150_I2C::parseRawData(const uint8_t *const data, int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const
 {
-	constexpr uint8_t DATA_SIZE = (REG_RHALL_MSB - REG_DATA_X_LSB) + 1;
-	uint8_t data[DATA_SIZE];
-	if (!readReg(REG_DATA_X_LSB, data, DATA_SIZE))
-		return false;
-
 	// Combine MSB and LSB into the upper bits of a 16-bit value, then shift down to sign extend
 	const int16_t dataX = static_cast<int16_t>((data[REG_DATA_X_MSB - REG_DATA_X_LSB] << 8) |
 											   (data[REG_DATA_X_LSB - REG_DATA_X_LSB] & DATA_X_LSB_BITS_DATA_X));
@@ -245,7 +240,15 @@ bool BMM150_I2C::readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall
 	const uint16_t dataRhall = static_cast<uint16_t>((data[REG_RHALL_MSB - REG_DATA_X_LSB] << 8) |
 													 (data[REG_RHALL_LSB - REG_DATA_X_LSB] & RHALL_LSB_BITS_RHALL));
 	rhall = dataRhall >> RHALL_LSB_RHALL_SHIFT;
+}
 
+bool BMM150_I2C::readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const
+{
+	uint8_t data[DATA_LENGTH];
+	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
+		return false;
+
+	parseRawData(data, x, y, z, rhall);
 	return true;
 }
 
@@ -327,20 +330,31 @@ int16_t BMM150_I2C::compensateZ(const int16_t rawZ, const uint16_t rhall) const
 	return static_cast<int16_t>(processCompZ5 / 16);
 }
 
-bool BMM150_I2C::readData(int16_t &x, int16_t &y, int16_t &z) const
+bool BMM150_I2C::parseData(const uint8_t *const data, const uint8_t length, int16_t &x, int16_t &y, int16_t &z) const
 {
+	if (length != DATA_LENGTH)
+		return false;
+
 	int16_t rawX = 0;
 	int16_t rawY = 0;
 	int16_t rawZ = 0;
 	uint16_t rhall = 0;
-	if (!readRawData(rawX, rawY, rawZ, rhall))
-		return false;
+	parseRawData(data, rawX, rawY, rawZ, rhall);
 
 	x = compensateX(rawX, rhall);
 	y = compensateY(rawY, rhall);
 	z = compensateZ(rawZ, rhall);
 
 	return true;
+}
+
+bool BMM150_I2C::readData(int16_t &x, int16_t &y, int16_t &z) const
+{
+	uint8_t data[DATA_LENGTH];
+	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
+		return false;
+
+	return parseData(data, DATA_LENGTH, x, y, z);
 }
 
 bool BMM150_I2C::readHeading(uint16_t &degrees) const

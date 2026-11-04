@@ -251,6 +251,9 @@ private:
 	/// @return True if successful
 	bool populateTrimData();
 
+	/// @brief Parse raw (uncompensated) data from the data register bytes (DATA_REGISTER onwards, DATA_LENGTH bytes)
+	void parseRawData(const uint8_t *const data, int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const;
+
 	/// @brief Compensate raw x-axis data (Bosch Sensortec fixed point compensation)
 	/// @return Compensated x-axis magnetic field (µT), or MAGNETIC_FIELD_OVERFLOW
 	int16_t compensateX(const int16_t rawX, const uint16_t rhall) const;
@@ -287,6 +290,10 @@ protected:
 	bool startWire() override;
 
 public:
+	// Data registers, for a host that reads them on the BMM150's behalf (e.g. the MPU-6500's auxiliary I2C master)
+	static constexpr uint8_t DATA_REGISTER = REG_DATA_X_LSB;							   // First data register (DATA X LSB)
+	static constexpr uint8_t DATA_LENGTH = (REG_RHALL_MSB - REG_DATA_X_LSB) + 1; // Number of data registers (DATA X LSB to RHALL MSB)
+
 	explicit BMM150_I2C(TwoWire &i2cWire = Wire, const I2CAddress i2cAddr = I2CAddress::Addr_0x10);
 
 	/// @brief Set power mode
@@ -526,6 +533,15 @@ public:
 	/// @param rhall Hall resistance (14-bit unsigned), used for temperature compensation
 	/// @return True if successful
 	bool readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const;
+
+	/// @brief Parse compensated magnetic field data from data register bytes already read (e.g. by the MPU-6500's auxiliary I2C master)
+	/// @param data Bytes read from DATA_REGISTER onwards
+	/// @param length Number of bytes in data (must be DATA_LENGTH)
+	/// @param x X-axis magnetic field (µT). MAGNETIC_FIELD_OVERFLOW on overflow
+	/// @param y Y-axis magnetic field (µT). MAGNETIC_FIELD_OVERFLOW on overflow
+	/// @param z Z-axis magnetic field (µT). MAGNETIC_FIELD_OVERFLOW on overflow
+	/// @return True if successful
+	bool parseData(const uint8_t *const data, const uint8_t length, int16_t &x, int16_t &y, int16_t &z) const;
 
 	/// @brief Read compensated magnetic field data (temperature and sensitivity compensated)
 	/// @param x X-axis magnetic field (µT). MAGNETIC_FIELD_OVERFLOW on overflow
