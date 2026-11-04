@@ -4,6 +4,7 @@
 #include "i2c_master.h"
 
 /// @brief Class for the Bosch BMM150 geomagnetic sensor
+/// @brief Note: The protocol is selected in hardware. The PS pin must be connected to VDDIO for I2C
 class BMM150_I2C final : public I2C_Master
 {
 public:
@@ -342,6 +343,11 @@ public:
 	/// @return True if communication succeeded and all axes passed
 	bool normalSelfTest();
 
+	/// @brief Enable / disable measurement channels. A disabled channel keeps its last measured value in the data registers
+	/// @brief Note: Disabling z also disables the hall resistance measurement, so z is not compensated and x / y use the trim reference instead
+	/// @return True if successful
+	bool enableChannels(const bool channelX, const bool channelY, const bool channelZ);
+
 	/// @brief Set output data rate (used in normal mode)
 	/// @return True if successful
 	template <DataOutputRate RATE>
@@ -478,20 +484,20 @@ public:
 
 	/// @brief Enable / disable the Data Overrun indication in the interrupt status register (not mapped to a pin)
 	/// @return True if successful
-	bool setDataOverrun(const bool enable);
+	bool enableDataOverrun(const bool enable);
 
-	/// @brief Configure the INT pin (Low-Threshold, High-Threshold and Overflow interrupts)
+	/// @brief Enable the configured Low-Threshold, High-Threshold and Overflow interrupts on the INT pin
 	/// @param enable True maps interrupt status to the INT pin, false leaves the pin in high-Z
 	/// @param latched True = pin stays on until interrupt status is read, false = cleared when condition no longer valid
 	/// @param activeHigh True = active high, false = active low
 	/// @return True if successful
-	bool setInterruptPin(const bool enable, const bool latched = true, const bool activeHigh = true);
+	bool enableInterrupts(const bool enable, const bool latched = true, const bool activeHigh = true);
 
-	/// @brief Configure the DRDY pin (Data Ready interrupt, always non-latched)
+	/// @brief Enable the Data Ready interrupt on the DRDY pin (always non-latched)
 	/// @param enable True maps data ready to the DRDY pin, false leaves the pin in high-Z
 	/// @param activeHigh True = active high, false = active low
 	/// @return True if successful
-	bool setDataReadyPin(const bool enable, const bool activeHigh = true);
+	bool enableDataReadyInterrupt(const bool enable, const bool activeHigh = true);
 
 	/// @brief Read the interrupt status. Reading clears latched interrupts and the INT pin
 	/// @param status Populated with the interrupt status

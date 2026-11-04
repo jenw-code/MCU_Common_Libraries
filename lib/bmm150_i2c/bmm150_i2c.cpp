@@ -109,6 +109,30 @@ bool BMM150_I2C::normalSelfTest()
 		   ((result[REG_DATA_Z_LSB - REG_DATA_X_LSB] & DATA_Z_LSB_BIT_Z_SELF_TEST) != 0);
 }
 
+bool BMM150_I2C::enableChannels(const bool channelX, const bool channelY, const bool channelZ)
+{
+	uint8_t value = 0;
+	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
+		return false;
+
+	if (channelX)
+		value &= ~INTERRUPT_AXES_BIT_CHANNEL_X; // Channel X - set to 0 (enabled)
+	else
+		value |= INTERRUPT_AXES_BIT_CHANNEL_X; // Channel X - set to 1 (disabled)
+
+	if (channelY)
+		value &= ~INTERRUPT_AXES_BIT_CHANNEL_Y; // Channel Y - set to 0 (enabled)
+	else
+		value |= INTERRUPT_AXES_BIT_CHANNEL_Y; // Channel Y - set to 1 (disabled)
+
+	if (channelZ)
+		value &= ~INTERRUPT_AXES_BIT_CHANNEL_Z; // Channel Z - set to 0 (enabled)
+	else
+		value |= INTERRUPT_AXES_BIT_CHANNEL_Z; // Channel Z - set to 1 (disabled)
+
+	return writeReg(REG_INTERRUPT_AXES, &value);
+}
+
 bool BMM150_I2C::setOverflowInterrupt(const bool enable)
 {
 	uint8_t value = 0;
@@ -123,7 +147,7 @@ bool BMM150_I2C::setOverflowInterrupt(const bool enable)
 	return writeReg(REG_INTERRUPT_SETTINGS, &value);
 }
 
-bool BMM150_I2C::setDataOverrun(const bool enable)
+bool BMM150_I2C::enableDataOverrun(const bool enable)
 {
 	uint8_t value = 0;
 	if (!readReg(REG_INTERRUPT_SETTINGS, &value, 1))
@@ -302,7 +326,7 @@ int16_t BMM150_I2C::compensateZ(const int16_t rawZ, const uint16_t rhall) const
 	return static_cast<int16_t>(processCompZ5 / 16);
 }
 
-bool BMM150_I2C::setInterruptPin(const bool enable, const bool latched, const bool activeHigh)
+bool BMM150_I2C::enableInterrupts(const bool enable, const bool latched, const bool activeHigh)
 {
 	uint8_t value = 0;
 	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
@@ -326,7 +350,7 @@ bool BMM150_I2C::setInterruptPin(const bool enable, const bool latched, const bo
 	return writeReg(REG_INTERRUPT_AXES, &value);
 }
 
-bool BMM150_I2C::setDataReadyPin(const bool enable, const bool activeHigh)
+bool BMM150_I2C::enableDataReadyInterrupt(const bool enable, const bool activeHigh)
 {
 	uint8_t value = 0;
 	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
