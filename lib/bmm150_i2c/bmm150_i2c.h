@@ -324,6 +324,8 @@ public:
 				value |= OP_MODE_OPMODE_SLEEP;
 			else if constexpr (MODE == PowerMode::Active)
 				value |= OP_MODE_OPMODE_NORMAL;
+			else
+				return false;
 
 			return writeReg(REG_OP_MODE, &value);
 		}
@@ -375,6 +377,8 @@ public:
 			value |= OP_MODE_DATA_RATE_25;
 		else if constexpr (RATE == DataOutputRate::Rate_30)
 			value |= OP_MODE_DATA_RATE_30;
+		else
+			return false;
 
 		return writeReg(REG_OP_MODE, &value);
 	}
