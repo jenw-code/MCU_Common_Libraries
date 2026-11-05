@@ -581,4 +581,15 @@ public:
 	/// @param degrees Heading in degrees (0 to 359)
 	/// @return True if successful. False if x or y overflowed, or there is no horizontal field
 	bool readHeading(uint16_t &degrees) const;
+
+	/// @brief Set up the device in one call. The defaults are the datasheet's general purpose (Regular) preset, measuring continuously
+	/// @return True if successful
+	template <PowerMode POWER_MODE = PowerMode::Active,
+			  MeasurementPreset PRESET = MeasurementPreset::Regular>
+	bool quickSetup()
+	{
+		// The power mode is set first, as the preset registers can't be written in suspend mode
+		return setPowerMode<POWER_MODE>() &&
+			   setMeasurementPreset<PRESET>();
+	}
 };
