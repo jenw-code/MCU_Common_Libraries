@@ -547,7 +547,7 @@ public:
 	/// @brief Check if new data is available (for polling when the DRDY pin is not used)
 	/// @brief Note: Reading clears the Data Ready Status, so read the data straight after
 	/// @return True if the data registers have been updated and not yet read
-	bool isDataReady() const
+	bool dataReady() const
 	{
 		uint8_t value = 0;
 		return readReg(REG_RHALL_LSB, &value, 1) && ((value & RHALL_LSB_BIT_DATA_READY_STATUS) != 0);
