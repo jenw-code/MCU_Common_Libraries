@@ -243,8 +243,9 @@ private:
 
 	bool _suspended = true; // Set from the device by initialiseSuspended, kept up to date by setPowerMode
 
-	/// @brief Return 8 bit chip ID
-	uint8_t getChipID() const
+	/// @brief Read the chip ID
+	/// @return Chip ID (IC_ID_VALUE for a BMM150), or 0 on failure or in suspend mode
+	uint8_t readChipID() const
 	{
 		return readReg(REG_CHIP_ID);
 	}
@@ -257,26 +258,35 @@ private:
 	/// @return True if successful
 	bool populateTrimData();
 
-	/// @brief Run the normal self-test (the device must be in sleep mode)
-	/// @return True if the test completed and all axes passed
-	bool runNormalSelfTest();
-
-	/// @brief Parse raw (uncompensated) data from the data register bytes (DATA_REGISTER onwards, DATA_LENGTH bytes)
+	/// @brief Parse raw (uncompensated) data from the data register bytes
+	/// @param data Bytes read from DATA_REGISTER onwards (DATA_LENGTH bytes)
+	/// @param x X-axis raw data (13-bit signed). DATA_XY_OVERFLOW on overflow
+	/// @param y Y-axis raw data (13-bit signed). DATA_XY_OVERFLOW on overflow
+	/// @param z Z-axis raw data (15-bit signed). DATA_Z_OVERFLOW on overflow
+	/// @param rhall Hall resistance (14-bit unsigned)
 	void parseRawData(const uint8_t *const data, int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const;
 
 	/// @brief Compensate raw x-axis data (Bosch Sensortec fixed point compensation)
+	/// @param rawX X-axis raw data (13-bit signed)
+	/// @param rhall Hall resistance (14-bit unsigned). 0 = not measured, so the trim reference is used
 	/// @return Compensated x-axis magnetic field (µT), or MAGNETIC_FIELD_OVERFLOW
 	int16_t compensateX(const int16_t rawX, const uint16_t rhall) const;
 
 	/// @brief Compensate raw y-axis data (Bosch Sensortec fixed point compensation)
+	/// @param rawY Y-axis raw data (13-bit signed)
+	/// @param rhall Hall resistance (14-bit unsigned). 0 = not measured, so the trim reference is used
 	/// @return Compensated y-axis magnetic field (µT), or MAGNETIC_FIELD_OVERFLOW
 	int16_t compensateY(const int16_t rawY, const uint16_t rhall) const;
 
 	/// @brief Compensate raw z-axis data (Bosch Sensortec fixed point compensation)
+	/// @param rawZ Z-axis raw data (15-bit signed)
+	/// @param rhall Hall resistance (14-bit unsigned). 0 = not measured, so z can't be compensated
 	/// @return Compensated z-axis magnetic field (µT), or MAGNETIC_FIELD_OVERFLOW
 	int16_t compensateZ(const int16_t rawZ, const uint16_t rhall) const;
 
-	/// @brief Return true if the interrupt axes include the x-axis
+	/// @brief Check whether the interrupt axes include the x-axis
+	/// @param axes The interrupt axes
+	/// @return True if the x-axis is included
 	static constexpr bool interruptAxesIncludeX(const InterruptAxes axes)
 	{
 		return (axes == InterruptAxes::X) ||
@@ -285,7 +295,9 @@ private:
 			   (axes == InterruptAxes::XYZ);
 	}
 
-	/// @brief Return true if the interrupt axes include the y-axis
+	/// @brief Check whether the interrupt axes include the y-axis
+	/// @param axes The interrupt axes
+	/// @return True if the y-axis is included
 	static constexpr bool interruptAxesIncludeY(const InterruptAxes axes)
 	{
 		return (axes == InterruptAxes::Y) ||
@@ -294,7 +306,9 @@ private:
 			   (axes == InterruptAxes::XYZ);
 	}
 
-	/// @brief Return true if the interrupt axes include the z-axis
+	/// @brief Check whether the interrupt axes include the z-axis
+	/// @param axes The interrupt axes
+	/// @return True if the z-axis is included
 	static constexpr bool interruptAxesIncludeZ(const InterruptAxes axes)
 	{
 		return (axes == InterruptAxes::Z) ||
@@ -313,9 +327,12 @@ public:
 	static constexpr uint8_t DATA_REGISTER = REG_DATA_X_LSB;					 // First data register (DATA X low byte)
 	static constexpr uint8_t DATA_LENGTH = (REG_RHALL_MSB - REG_DATA_X_LSB) + 1; // Number of data registers (DATA X low byte to RHALL high byte)
 
+	/// @param i2cWire The I2C bus the device is connected to
+	/// @param i2cAddr The device's I2C address, set by the CSB and SDO pins
 	explicit BMM150_I2C(TwoWire &i2cWire = Wire, const I2CAddress i2cAddr = I2CAddress::Addr_0x10);
 
 	/// @brief Set power mode
+	/// @tparam MODE Suspend, Sleep or Active (measuring continuously at the output data rate). Off can't be set
 	/// @return True if successful
 	template <PowerMode MODE>
 	bool setPowerMode()
@@ -379,16 +396,21 @@ public:
 	bool softReset();
 
 	/// @brief Run the normal self-test (checks x, y and z signal paths and connectivity)
-	/// @brief Note: The test runs in sleep mode. The power mode is restored afterwards
-	/// @return True if all axes passed and the power mode was restored
+	/// @brief Note: The self-test puts the device in sleep mode, and the previous power mode is not restored.
+	/// @brief It's therefore recommended to configure the device after the self-test
+	/// @return True if the test completed and all axes passed
 	bool normalSelfTest();
 
 	/// @brief Enable / disable measurement channels. A disabled channel keeps its last measured value in the data registers
 	/// @brief Note: Disabling z also disables the hall resistance measurement, so z is not compensated and x / y use the trim reference instead
+	/// @param channelX True = x-axis measured, false = disabled
+	/// @param channelY True = y-axis measured, false = disabled
+	/// @param channelZ True = z-axis and hall resistance measured, false = disabled
 	/// @return True if successful
 	bool enableChannels(const bool channelX, const bool channelY, const bool channelZ);
 
 	/// @brief Set output data rate (used in normal mode)
+	/// @tparam RATE The output data rate (2 to 30 Hz)
 	/// @return True if successful
 	template <DataOutputRate RATE>
 	bool setDataRate()
@@ -448,6 +470,7 @@ public:
 	}
 
 	/// @brief Set recommended preset for repetitions and output data rate
+	/// @tparam PRESET The preset (see MeasurementPreset for each one's repetitions and rate)
 	/// @return True if successful
 	template <MeasurementPreset PRESET>
 	bool setMeasurementPreset()
@@ -539,10 +562,12 @@ public:
 	}
 
 	/// @brief Enable / disable the Overflow interrupt (mapped to INT pin, shared for x, y and z axes)
+	/// @param enable True = enabled, false = disabled
 	/// @return True if successful
 	bool setOverflowInterrupt(const bool enable);
 
 	/// @brief Enable / disable the Data Overrun indication in the interrupt status register (not mapped to a pin)
+	/// @param enable True = enabled, false = disabled
 	/// @return True if successful
 	bool enableDataOverrun(const bool enable);
 
@@ -603,6 +628,8 @@ public:
 	bool readHeading(uint16_t &degrees) const;
 
 	/// @brief Set up the device in one call. The defaults are the datasheet's general purpose (Regular) preset, measuring continuously
+	/// @tparam POWER_MODE Power mode (default Active, measuring continuously)
+	/// @tparam PRESET Measurement preset (default Regular)
 	/// @return True if successful
 	template <PowerMode POWER_MODE = PowerMode::Active,
 			  MeasurementPreset PRESET = MeasurementPreset::Regular>

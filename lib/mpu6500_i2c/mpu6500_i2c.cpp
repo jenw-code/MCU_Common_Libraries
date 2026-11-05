@@ -4,8 +4,8 @@ MPU6500_I2C::MPU6500_I2C(TwoWire &i2cWire, const I2CAddress i2cAddr) : I2C_Maste
 
 bool MPU6500_I2C::startWire()
 {
-	return I2C_Master::startWire() &&
-		   (getWhoAmI() == IC_ID_VALUE) &&
+	return I2C_Master::startWire() &&	   // The device must respond at its address before any of its registers are used
+		   (readChipID() == IC_ID_VALUE) && // Confirm the device is an MPU-6500
 		   initialiseFullScales();
 }
 
@@ -71,6 +71,14 @@ bool MPU6500_I2C::enableTemperatureSensor(const bool enable)
 
 bool MPU6500_I2C::setGyroOffsets(const int16_t x, const int16_t y, const int16_t z)
 {
+	// The offsets are written in one transfer, in register order
+	static_assert((REG_XG_OFFSET_L == (REG_XG_OFFSET_H + 1)) &&
+					  (REG_YG_OFFSET_H == (REG_XG_OFFSET_H + 2)) &&
+					  (REG_YG_OFFSET_L == (REG_XG_OFFSET_H + 3)) &&
+					  (REG_ZG_OFFSET_H == (REG_XG_OFFSET_H + 4)) &&
+					  (REG_ZG_OFFSET_L == (REG_XG_OFFSET_H + 5)),
+				  "XG_OFFSET_H to ZG_OFFSET_L must be contiguous");
+
 	const uint8_t offsets[] = {
 		static_cast<uint8_t>(static_cast<uint16_t>(x) >> 8), // XG_OFFSET_H: X offset high byte
 		static_cast<uint8_t>(x),							 // XG_OFFSET_L: X offset low byte
@@ -80,10 +88,10 @@ bool MPU6500_I2C::setGyroOffsets(const int16_t x, const int16_t y, const int16_t
 		static_cast<uint8_t>(z)								 // ZG_OFFSET_L: Z offset low byte
 	};
 
-	return writeReg(REG_XG_OFFSET_H, offsets, sizeof(offsets)); // XG_OFFSET_H to ZG_OFFSET_L are contiguous
+	return writeReg(REG_XG_OFFSET_H, offsets, sizeof(offsets));
 }
 
-bool MPU6500_I2C::writeAccelOffset(const uint8_t regH, const uint8_t regL, const uint8_t offsBits, const uint8_t offsShift, const int16_t offset)
+bool MPU6500_I2C::writeAccelOffset(const uint8_t regH, const uint8_t regL, const uint8_t offsetBits, const uint8_t offsetShift, const int16_t offset)
 {
 	// Keep the reserved bit in the L register
 	uint8_t valueL = 0;
@@ -91,25 +99,25 @@ bool MPU6500_I2C::writeAccelOffset(const uint8_t regH, const uint8_t regL, const
 		return false;
 
 	// Bit 0 of the low byte is reserved, so the offset is shifted up past it
-	const uint16_t shiftedOffset = static_cast<uint16_t>(offset) << offsShift;
+	const uint16_t shiftedOffset = static_cast<uint16_t>(offset) << offsetShift;
 
-	const uint8_t data[] = {
-		static_cast<uint8_t>(shiftedOffset >> 8),								// High byte
-		static_cast<uint8_t>((valueL & ~offsBits) | (shiftedOffset & offsBits)) // Low byte, reserved bit kept
-	};
+	const uint8_t valueH = static_cast<uint8_t>(shiftedOffset >> 8);
+	valueL = static_cast<uint8_t>((valueL & ~offsetBits) | (shiftedOffset & offsetBits)); // Reserved bit kept
 
-	return writeReg(regH, data, sizeof(data)); // H and L are contiguous
+	return writeReg(regH, &valueH) &&
+		   writeReg(regL, &valueL);
 }
 
-bool MPU6500_I2C::readAccelOffset(const uint8_t regH, const uint8_t regL, const uint8_t offsBits, const uint8_t offsShift, int16_t &offset) const
+bool MPU6500_I2C::readAccelOffset(const uint8_t regH, const uint8_t regL, const uint8_t offsetBits, const uint8_t offsetShift, int16_t &offset) const
 {
-	uint8_t data[2];
-	if (!readReg(regH, data, sizeof(data))) // H and L are contiguous
+	uint8_t valueH = 0;
+	uint8_t valueL = 0;
+	if (!readReg(regH, &valueH, 1) || !readReg(regL, &valueL, 1))
 		return false;
 
 	// Combine H and L into the upper bits of a 16-bit value, then shift down to sign extend
-	const int16_t combined = static_cast<int16_t>((data[regH - regH] << 8) | (data[regL - regH] & offsBits));
-	offset = combined >> offsShift;
+	const int16_t combined = static_cast<int16_t>((valueH << 8) | (valueL & offsetBits));
+	offset = combined >> offsetShift;
 
 	return true;
 }
@@ -121,7 +129,7 @@ bool MPU6500_I2C::setAccelOffsets(const int16_t x, const int16_t y, const int16_
 		   writeAccelOffset(REG_ZA_OFFSET_H, REG_ZA_OFFSET_L, ZA_OFFSET_L_BITS_ZA_OFFS, ZA_OFFSET_L_ZA_OFFS_SHIFT, z);
 }
 
-bool MPU6500_I2C::getAccelOffsets(int16_t &x, int16_t &y, int16_t &z) const
+bool MPU6500_I2C::readAccelOffsets(int16_t &x, int16_t &y, int16_t &z) const
 {
 	return readAccelOffset(REG_XA_OFFSET_H, REG_XA_OFFSET_L, XA_OFFSET_L_BITS_XA_OFFS, XA_OFFSET_L_XA_OFFS_SHIFT, x) &&
 		   readAccelOffset(REG_YA_OFFSET_H, REG_YA_OFFSET_L, YA_OFFSET_L_BITS_YA_OFFS, YA_OFFSET_L_YA_OFFS_SHIFT, y) &&
@@ -296,6 +304,10 @@ bool MPU6500_I2C::setI2CMasterDelay(const uint8_t delay)
 
 bool MPU6500_I2C::readExternalSensorData(uint8_t *const data, const uint8_t index, const uint8_t length) const
 {
+	// Register index is addressed as EXT_SENS_DATA_00 + index, and read in one transfer
+	static_assert(REG_EXT_SENS_DATA_23 == (REG_EXT_SENS_DATA_00 + (EXT_SENS_DATA_COUNT - 1)),
+				  "EXT_SENS_DATA_00 to EXT_SENS_DATA_23 must be contiguous");
+
 	if ((length == 0) || ((index + length) > EXT_SENS_DATA_COUNT))
 		return false;
 
@@ -304,6 +316,12 @@ bool MPU6500_I2C::readExternalSensorData(uint8_t *const data, const uint8_t inde
 
 bool MPU6500_I2C::transferSlave4(const uint8_t addr, const uint8_t reg, const uint8_t data, const bool registerDisabled)
 {
+	// The setup is written in one transfer, in register order
+	static_assert((REG_I2C_SLV4_REG == (REG_I2C_SLV4_ADDR + 1)) &&
+					  (REG_I2C_SLV4_DO == (REG_I2C_SLV4_ADDR + 2)) &&
+					  (REG_I2C_SLV4_CTRL == (REG_I2C_SLV4_ADDR + 3)),
+				  "I2C_SLV4_ADDR to I2C_SLV4_CTRL must be contiguous");
+
 	// Keep the I2C master delay and done interrupt settings, which share the control register
 	uint8_t ctrl = 0;
 	if (!readReg(REG_I2C_SLV4_CTRL, &ctrl, 1))
@@ -322,7 +340,7 @@ bool MPU6500_I2C::transferSlave4(const uint8_t addr, const uint8_t reg, const ui
 		ctrl  // I2C_SLV4_CTRL
 	};
 
-	if (!writeReg(REG_I2C_SLV4_ADDR, setup, sizeof(setup))) // ADDR, REG, DO and CTRL are contiguous
+	if (!writeReg(REG_I2C_SLV4_ADDR, setup, sizeof(setup)))
 		return false;
 
 	// Wait for the transfer to complete. Note: reading the status clears all of its bits, including other slaves' NACKs
@@ -456,13 +474,20 @@ bool MPU6500_I2C::setFifoSources(const FifoSources &sources)
 
 bool MPU6500_I2C::readFifoCount(uint16_t &count) const
 {
-	// Reading the high byte first latches both bytes
+	// Both bytes are read in one transfer. Reading the high byte first latches both bytes
+	static_assert(REG_FIFO_COUNT_L == (REG_FIFO_COUNT_H + 1), "FIFO_COUNT_H and FIFO_COUNT_L must be contiguous");
+
+	// Position of each byte in data. The read starts at FIFO_COUNT_H,
+	// so each position is its register's offset from that one
+	constexpr uint8_t FIFO_COUNT_H_INDEX = REG_FIFO_COUNT_H - REG_FIFO_COUNT_H;
+	constexpr uint8_t FIFO_COUNT_L_INDEX = REG_FIFO_COUNT_L - REG_FIFO_COUNT_H;
+
 	uint8_t data[2];
-	if (!readReg(REG_FIFO_COUNT_H, data, sizeof(data))) // High and low bytes are contiguous
+	if (!readReg(REG_FIFO_COUNT_H, data, sizeof(data)))
 		return false;
 
-	count = static_cast<uint16_t>(((data[REG_FIFO_COUNT_H - REG_FIFO_COUNT_H] & FIFO_COUNT_H_BITS_FIFO_CNT) << 8) |
-								  data[REG_FIFO_COUNT_L - REG_FIFO_COUNT_H]);
+	count = static_cast<uint16_t>(((data[FIFO_COUNT_H_INDEX] & FIFO_COUNT_H_BITS_FIFO_CNT) << 8) |
+								  data[FIFO_COUNT_L_INDEX]);
 
 	return true;
 }
@@ -554,13 +579,30 @@ bool MPU6500_I2C::resetDmp()
 
 void MPU6500_I2C::parseRawData(const uint8_t *const data, RawSensorData &raw) const
 {
-	raw.accelX = static_cast<int16_t>((data[REG_ACCEL_XOUT_H - DATA_REGISTER] << 8) | data[REG_ACCEL_XOUT_L - DATA_REGISTER]);
-	raw.accelY = static_cast<int16_t>((data[REG_ACCEL_YOUT_H - DATA_REGISTER] << 8) | data[REG_ACCEL_YOUT_L - DATA_REGISTER]);
-	raw.accelZ = static_cast<int16_t>((data[REG_ACCEL_ZOUT_H - DATA_REGISTER] << 8) | data[REG_ACCEL_ZOUT_L - DATA_REGISTER]);
-	raw.temperature = static_cast<int16_t>((data[REG_TEMP_OUT_H - DATA_REGISTER] << 8) | data[REG_TEMP_OUT_L - DATA_REGISTER]);
-	raw.gyroX = static_cast<int16_t>((data[REG_GYRO_XOUT_H - DATA_REGISTER] << 8) | data[REG_GYRO_XOUT_L - DATA_REGISTER]);
-	raw.gyroY = static_cast<int16_t>((data[REG_GYRO_YOUT_H - DATA_REGISTER] << 8) | data[REG_GYRO_YOUT_L - DATA_REGISTER]);
-	raw.gyroZ = static_cast<int16_t>((data[REG_GYRO_ZOUT_H - DATA_REGISTER] << 8) | data[REG_GYRO_ZOUT_L - DATA_REGISTER]);
+	// Position of each data register in data. The read starts at DATA_REGISTER,
+	// so each position is its register's offset from that one
+	constexpr uint8_t ACCEL_XOUT_H_INDEX = REG_ACCEL_XOUT_H - DATA_REGISTER;
+	constexpr uint8_t ACCEL_XOUT_L_INDEX = REG_ACCEL_XOUT_L - DATA_REGISTER;
+	constexpr uint8_t ACCEL_YOUT_H_INDEX = REG_ACCEL_YOUT_H - DATA_REGISTER;
+	constexpr uint8_t ACCEL_YOUT_L_INDEX = REG_ACCEL_YOUT_L - DATA_REGISTER;
+	constexpr uint8_t ACCEL_ZOUT_H_INDEX = REG_ACCEL_ZOUT_H - DATA_REGISTER;
+	constexpr uint8_t ACCEL_ZOUT_L_INDEX = REG_ACCEL_ZOUT_L - DATA_REGISTER;
+	constexpr uint8_t TEMP_OUT_H_INDEX = REG_TEMP_OUT_H - DATA_REGISTER;
+	constexpr uint8_t TEMP_OUT_L_INDEX = REG_TEMP_OUT_L - DATA_REGISTER;
+	constexpr uint8_t GYRO_XOUT_H_INDEX = REG_GYRO_XOUT_H - DATA_REGISTER;
+	constexpr uint8_t GYRO_XOUT_L_INDEX = REG_GYRO_XOUT_L - DATA_REGISTER;
+	constexpr uint8_t GYRO_YOUT_H_INDEX = REG_GYRO_YOUT_H - DATA_REGISTER;
+	constexpr uint8_t GYRO_YOUT_L_INDEX = REG_GYRO_YOUT_L - DATA_REGISTER;
+	constexpr uint8_t GYRO_ZOUT_H_INDEX = REG_GYRO_ZOUT_H - DATA_REGISTER;
+	constexpr uint8_t GYRO_ZOUT_L_INDEX = REG_GYRO_ZOUT_L - DATA_REGISTER;
+
+	raw.accelX = static_cast<int16_t>((data[ACCEL_XOUT_H_INDEX] << 8) | data[ACCEL_XOUT_L_INDEX]);
+	raw.accelY = static_cast<int16_t>((data[ACCEL_YOUT_H_INDEX] << 8) | data[ACCEL_YOUT_L_INDEX]);
+	raw.accelZ = static_cast<int16_t>((data[ACCEL_ZOUT_H_INDEX] << 8) | data[ACCEL_ZOUT_L_INDEX]);
+	raw.temperature = static_cast<int16_t>((data[TEMP_OUT_H_INDEX] << 8) | data[TEMP_OUT_L_INDEX]);
+	raw.gyroX = static_cast<int16_t>((data[GYRO_XOUT_H_INDEX] << 8) | data[GYRO_XOUT_L_INDEX]);
+	raw.gyroY = static_cast<int16_t>((data[GYRO_YOUT_H_INDEX] << 8) | data[GYRO_YOUT_L_INDEX]);
+	raw.gyroZ = static_cast<int16_t>((data[GYRO_ZOUT_H_INDEX] << 8) | data[GYRO_ZOUT_L_INDEX]);
 }
 
 bool MPU6500_I2C::readRawData(RawSensorData &raw) const
@@ -571,6 +613,11 @@ bool MPU6500_I2C::readRawData(RawSensorData &raw) const
 
 	parseRawData(data, raw);
 	return true;
+}
+
+int32_t MPU6500_I2C::temperatureFromRaw(const int16_t raw)
+{
+	return ((static_cast<int32_t>(raw) * TEMPERATURE_FACTOR) >> SCALE_SHIFT) + TEMPERATURE_OFFSET;
 }
 
 bool MPU6500_I2C::parseData(const uint8_t *const data, const uint8_t length, SensorData &result) const
@@ -584,7 +631,7 @@ bool MPU6500_I2C::parseData(const uint8_t *const data, const uint8_t length, Sen
 	result.accelX = static_cast<int16_t>((static_cast<int32_t>(raw.accelX) * MG_PER_G) >> _accelShift);
 	result.accelY = static_cast<int16_t>((static_cast<int32_t>(raw.accelY) * MG_PER_G) >> _accelShift);
 	result.accelZ = static_cast<int16_t>((static_cast<int32_t>(raw.accelZ) * MG_PER_G) >> _accelShift);
-	result.temperature = ((static_cast<int32_t>(raw.temperature) * TEMPERATURE_FACTOR) >> SCALE_SHIFT) + TEMPERATURE_OFFSET;
+	result.temperature = temperatureFromRaw(raw.temperature);
 	result.gyroX = (static_cast<int32_t>(raw.gyroX) * _gyroFactor) >> SCALE_SHIFT;
 	result.gyroY = (static_cast<int32_t>(raw.gyroY) * _gyroFactor) >> SCALE_SHIFT;
 	result.gyroZ = (static_cast<int32_t>(raw.gyroZ) * _gyroFactor) >> SCALE_SHIFT;
@@ -651,38 +698,50 @@ bool MPU6500_I2C::validAccelSelfTestResponse(const int32_t response)
 	return (magnitude >= SELF_TEST_ACCEL_MIN_RESPONSE) && (magnitude <= SELF_TEST_ACCEL_MAX_RESPONSE);
 }
 
+bool MPU6500_I2C::validSelfTestTemperature(const int16_t rawTemperature)
+{
+	const int32_t temperature = temperatureFromRaw(rawTemperature);
+	return (temperature >= SELF_TEST_TEMPERATURE_MIN) &&
+		   (temperature <= static_cast<int32_t>(SELF_TEST_TEMPERATURE_MAX));
+}
+
 bool MPU6500_I2C::readSelfTestAverages(RawSensorData &normal, RawSensorData &testing)
 {
-	if (!writeReg(REG_SMPLRT_DIV, SELF_TEST_CONFIG, sizeof(SELF_TEST_CONFIG))) // SMPLRT_DIV to ACCEL_CONFIG_2 are contiguous
+	if (!writeReg(REG_SMPLRT_DIV, SELF_TEST_CONFIG, sizeof(SELF_TEST_CONFIG)))
 		return false;
+
+	// The test configuration sets ±250 dps and ±2 g, so the data scaling must match
+	_gyroFactor = GYRO_FACTOR_250DPS;
+	_accelShift = ACCEL_SHIFT_2G;
 
 	delay(SELF_TEST_SETTLE_TIME_MILLIS);
 	if (!readSelfTestAverageRawData(normal))
 		return false;
 
-	if (!writeReg(REG_GYRO_CONFIG, SELF_TEST_ENABLE, sizeof(SELF_TEST_ENABLE))) // GYRO_CONFIG and ACCEL_CONFIG are contiguous
+	if (!writeReg(REG_GYRO_CONFIG, SELF_TEST_ENABLE, sizeof(SELF_TEST_ENABLE)))
 		return false;
 
 	delay(SELF_TEST_SETTLE_TIME_MILLIS);
-	return readSelfTestAverageRawData(testing);
+	if (!readSelfTestAverageRawData(testing))
+		return false;
+
+	// Turn the self-test off by writing the test configuration again
+	if (!writeReg(REG_SMPLRT_DIV, SELF_TEST_CONFIG, sizeof(SELF_TEST_CONFIG)))
+		return false;
+
+	delay(SELF_TEST_SETTLE_TIME_MILLIS);
+	return true;
 }
 
 bool MPU6500_I2C::normalSelfTest()
 {
-	// Save the configuration the test changes
-	uint8_t saved[sizeof(SELF_TEST_CONFIG)];
-	if (!readReg(REG_SMPLRT_DIV, saved, sizeof(saved))) // SMPLRT_DIV to ACCEL_CONFIG_2 are contiguous
+	// Turn on everything the test checks
+	if (!setPowerMode<PowerMode::SixAxis>() || !enableTemperatureSensor(true))
 		return false;
 
 	RawSensorData normal;
 	RawSensorData testing;
-	const bool measured = readSelfTestAverages(normal, testing);
-
-	// Restore the configuration even if the measurement failed
-	const bool restored = writeReg(REG_SMPLRT_DIV, saved, sizeof(saved));
-	delay(SELF_TEST_SETTLE_TIME_MILLIS);
-
-	if (!measured || !restored)
+	if (!readSelfTestAverages(normal, testing))
 		return false;
 
 	return validGyroSelfTestResponse(testing.gyroX - normal.gyroX) &&
@@ -690,7 +749,8 @@ bool MPU6500_I2C::normalSelfTest()
 		   validGyroSelfTestResponse(testing.gyroZ - normal.gyroZ) &&
 		   validAccelSelfTestResponse(testing.accelX - normal.accelX) &&
 		   validAccelSelfTestResponse(testing.accelY - normal.accelY) &&
-		   validAccelSelfTestResponse(testing.accelZ - normal.accelZ);
+		   validAccelSelfTestResponse(testing.accelZ - normal.accelZ) &&
+		   validSelfTestTemperature(normal.temperature);
 }
 
 bool MPU6500_I2C::disableWakeOnMotion()

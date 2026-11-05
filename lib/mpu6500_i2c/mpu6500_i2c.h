@@ -240,7 +240,30 @@ private:
 	static constexpr uint8_t REG_GYRO_YOUT_L = 0x46;		// Gyro Y, low byte
 	static constexpr uint8_t REG_GYRO_ZOUT_H = 0x47;		// Gyro Z, high byte
 	static constexpr uint8_t REG_GYRO_ZOUT_L = 0x48;		// Gyro Z, low byte
-	static constexpr uint8_t REG_EXT_SENS_DATA_00 = 0x49;	// External sensor data 00 (00 to 23 are 0x49 to 0x60)
+	static constexpr uint8_t REG_EXT_SENS_DATA_00 = 0x49;	// External sensor data 00
+	static constexpr uint8_t REG_EXT_SENS_DATA_01 = 0x4A;	// External sensor data 01
+	static constexpr uint8_t REG_EXT_SENS_DATA_02 = 0x4B;	// External sensor data 02
+	static constexpr uint8_t REG_EXT_SENS_DATA_03 = 0x4C;	// External sensor data 03
+	static constexpr uint8_t REG_EXT_SENS_DATA_04 = 0x4D;	// External sensor data 04
+	static constexpr uint8_t REG_EXT_SENS_DATA_05 = 0x4E;	// External sensor data 05
+	static constexpr uint8_t REG_EXT_SENS_DATA_06 = 0x4F;	// External sensor data 06
+	static constexpr uint8_t REG_EXT_SENS_DATA_07 = 0x50;	// External sensor data 07
+	static constexpr uint8_t REG_EXT_SENS_DATA_08 = 0x51;	// External sensor data 08
+	static constexpr uint8_t REG_EXT_SENS_DATA_09 = 0x52;	// External sensor data 09
+	static constexpr uint8_t REG_EXT_SENS_DATA_10 = 0x53;	// External sensor data 10
+	static constexpr uint8_t REG_EXT_SENS_DATA_11 = 0x54;	// External sensor data 11
+	static constexpr uint8_t REG_EXT_SENS_DATA_12 = 0x55;	// External sensor data 12
+	static constexpr uint8_t REG_EXT_SENS_DATA_13 = 0x56;	// External sensor data 13
+	static constexpr uint8_t REG_EXT_SENS_DATA_14 = 0x57;	// External sensor data 14
+	static constexpr uint8_t REG_EXT_SENS_DATA_15 = 0x58;	// External sensor data 15
+	static constexpr uint8_t REG_EXT_SENS_DATA_16 = 0x59;	// External sensor data 16
+	static constexpr uint8_t REG_EXT_SENS_DATA_17 = 0x5A;	// External sensor data 17
+	static constexpr uint8_t REG_EXT_SENS_DATA_18 = 0x5B;	// External sensor data 18
+	static constexpr uint8_t REG_EXT_SENS_DATA_19 = 0x5C;	// External sensor data 19
+	static constexpr uint8_t REG_EXT_SENS_DATA_20 = 0x5D;	// External sensor data 20
+	static constexpr uint8_t REG_EXT_SENS_DATA_21 = 0x5E;	// External sensor data 21
+	static constexpr uint8_t REG_EXT_SENS_DATA_22 = 0x5F;	// External sensor data 22
+	static constexpr uint8_t REG_EXT_SENS_DATA_23 = 0x60;	// External sensor data 23
 	static constexpr uint8_t REG_I2C_SLV0_DO = 0x63;		// I2C slave 0 data out
 	static constexpr uint8_t REG_I2C_SLV1_DO = 0x64;		// I2C slave 1 data out
 	static constexpr uint8_t REG_I2C_SLV2_DO = 0x65;		// I2C slave 2 data out
@@ -644,6 +667,17 @@ private:
 		ACCEL_CONFIG_BIT_XA_ST | ACCEL_CONFIG_BIT_YA_ST | ACCEL_CONFIG_BIT_ZA_ST | ACCEL_CONFIG_ACCEL_FS_SEL_2G // ACCEL_CONFIG: ±2 g, self-test on
 	};
 
+	// The self-test configuration is written in one transfer, in register order
+	static_assert((REG_CONFIG == (REG_SMPLRT_DIV + 1)) &&
+					  (REG_GYRO_CONFIG == (REG_SMPLRT_DIV + 2)) &&
+					  (REG_ACCEL_CONFIG == (REG_SMPLRT_DIV + 3)) &&
+					  (REG_ACCEL_CONFIG_2 == (REG_SMPLRT_DIV + 4)),
+				  "SMPLRT_DIV to ACCEL_CONFIG_2 must be contiguous");
+	static_assert(sizeof(SELF_TEST_CONFIG) == ((REG_ACCEL_CONFIG_2 - REG_SMPLRT_DIV) + 1),
+				  "SELF_TEST_CONFIG must hold one value for each register from SMPLRT_DIV to ACCEL_CONFIG_2");
+	static_assert(sizeof(SELF_TEST_ENABLE) == ((REG_ACCEL_CONFIG - REG_GYRO_CONFIG) + 1),
+				  "SELF_TEST_ENABLE must hold one value for GYRO_CONFIG and one for ACCEL_CONFIG");
+
 	static constexpr uint8_t SELF_TEST_SAMPLE_COUNT = 200;		 // Samples averaged with and without self-test enabled
 	static constexpr uint8_t SELF_TEST_SAMPLE_PERIOD_MILLIS = 1; // Test sample rate is 1 kHz
 	static constexpr uint8_t SELF_TEST_SETTLE_TIME_MILLIS = 20;	 // Time for the output to settle after a configuration change
@@ -656,6 +690,10 @@ private:
 	static constexpr uint16_t SELF_TEST_GYRO_MIN_RESPONSE = SELF_TEST_GYRO_MIN_DPS * GYRO_LSB_PER_DPS_250DPS;							   // 7860 LSB
 	static constexpr uint16_t SELF_TEST_ACCEL_MIN_RESPONSE = (static_cast<uint32_t>(SELF_TEST_ACCEL_MIN_MG) << ACCEL_SHIFT_2G) / MG_PER_G; // 3686 LSB
 	static constexpr uint16_t SELF_TEST_ACCEL_MAX_RESPONSE = (static_cast<uint32_t>(SELF_TEST_ACCEL_MAX_MG) << ACCEL_SHIFT_2G) / MG_PER_G; // 11059 LSB
+
+	// Self-test temperature limits (the datasheet's operating range), in m°C
+	static constexpr int32_t SELF_TEST_TEMPERATURE_MIN = -40000; // -40 °C
+	static constexpr uint32_t SELF_TEST_TEMPERATURE_MAX = 85000; // 85 °C
 
 	// Registers and bits for slaves 0 to 3 (no default values, so instances can be constexpr within the class)
 	struct SlaveRegisters final
@@ -729,14 +767,29 @@ private:
 		.ctrlBitEn = I2C_SLV3_CTRL_BIT_I2C_SLV3_EN,
 	};
 
+	// setSlaveRead and setSlaveWrite write each slave's ADDR, REG and CTRL in one transfer, in register order
+	static_assert((SLAVE0_REGISTERS.regReg == (SLAVE0_REGISTERS.regAddr + 1)) &&
+					  (SLAVE0_REGISTERS.regCtrl == (SLAVE0_REGISTERS.regAddr + 2)),
+				  "I2C_SLV0_ADDR, I2C_SLV0_REG and I2C_SLV0_CTRL must be contiguous");
+	static_assert((SLAVE1_REGISTERS.regReg == (SLAVE1_REGISTERS.regAddr + 1)) &&
+					  (SLAVE1_REGISTERS.regCtrl == (SLAVE1_REGISTERS.regAddr + 2)),
+				  "I2C_SLV1_ADDR, I2C_SLV1_REG and I2C_SLV1_CTRL must be contiguous");
+	static_assert((SLAVE2_REGISTERS.regReg == (SLAVE2_REGISTERS.regAddr + 1)) &&
+					  (SLAVE2_REGISTERS.regCtrl == (SLAVE2_REGISTERS.regAddr + 2)),
+				  "I2C_SLV2_ADDR, I2C_SLV2_REG and I2C_SLV2_CTRL must be contiguous");
+	static_assert((SLAVE3_REGISTERS.regReg == (SLAVE3_REGISTERS.regAddr + 1)) &&
+					  (SLAVE3_REGISTERS.regCtrl == (SLAVE3_REGISTERS.regAddr + 2)),
+				  "I2C_SLV3_ADDR, I2C_SLV3_REG and I2C_SLV3_CTRL must be contiguous");
+
 	template <AuxSlave>
 	static constexpr bool ALWAYS_FALSE = false; // Fails a static_assert for an unimplemented enum value
 
 	uint8_t _accelShift = ACCEL_SHIFT_2G;	   // Set from the device by initialiseFullScales, kept up to date by setAccelFullScale
 	uint16_t _gyroFactor = GYRO_FACTOR_250DPS; // Set from the device by initialiseFullScales, kept up to date by setGyroFullScale
 
-	/// @brief Return 8 bit device ID
-	uint8_t getWhoAmI() const
+	/// @brief Read the chip ID
+	/// @return WHO_AM_I value (IC_ID_VALUE for an MPU-6500), or 0 on failure
+	uint8_t readChipID() const
 	{
 		return readReg(REG_WHO_AM_I);
 	}
@@ -746,14 +799,26 @@ private:
 	bool initialiseFullScales();
 
 	/// @brief Write one axis' 15-bit accel offset, keeping the reserved bit in the L register
+	/// @param regH The axis' offset high byte register
+	/// @param regL The axis' offset low byte register
+	/// @param offsetBits Bits of the low byte that hold the offset (bit 0 is reserved)
+	/// @param offsetShift Position of the offset's lowest bit in the low byte
+	/// @param offset Offset to write (-16384 to 16383)
 	/// @return True if successful
-	bool writeAccelOffset(const uint8_t regH, const uint8_t regL, const uint8_t offsBits, const uint8_t offsShift, const int16_t offset);
+	bool writeAccelOffset(const uint8_t regH, const uint8_t regL, const uint8_t offsetBits, const uint8_t offsetShift, const int16_t offset);
 
 	/// @brief Read one axis' 15-bit accel offset
+	/// @param regH The axis' offset high byte register
+	/// @param regL The axis' offset low byte register
+	/// @param offsetBits Bits of the low byte that hold the offset (bit 0 is reserved)
+	/// @param offsetShift Position of the offset's lowest bit in the low byte
+	/// @param offset Offset read (-16384 to 16383)
 	/// @return True if successful
-	bool readAccelOffset(const uint8_t regH, const uint8_t regL, const uint8_t offsBits, const uint8_t offsShift, int16_t &offset) const;
+	bool readAccelOffset(const uint8_t regH, const uint8_t regL, const uint8_t offsetBits, const uint8_t offsetShift, int16_t &offset) const;
 
 	/// @brief Get the registers and bits for slaves 0 to 3
+	/// @tparam SLAVE The slave (Slave0 to Slave3. Slave4 has different registers)
+	/// @return The slave's registers and bits
 	template <AuxSlave SLAVE>
 	static constexpr SlaveRegisters getSlaveRegisters()
 	{
@@ -779,8 +844,15 @@ private:
 	/// @return True if the transfer completed without a NACK
 	bool transferSlave4(const uint8_t addr, const uint8_t reg, const uint8_t data, const bool registerDisabled);
 
-	/// @brief Parse raw data from the data register bytes (DATA_REGISTER onwards, DATA_LENGTH bytes)
+	/// @brief Parse raw data from the data register bytes
+	/// @param data Bytes read from DATA_REGISTER onwards (DATA_LENGTH bytes)
+	/// @param raw Raw accel, temperature and gyro data
 	void parseRawData(const uint8_t *const data, RawSensorData &raw) const;
+
+	/// @brief Convert a raw temperature to m°C
+	/// @param raw Raw temperature (TEMP_OUT)
+	/// @return Temperature (m°C)
+	static int32_t temperatureFromRaw(const int16_t raw);
 
 	/// @brief Parse scaled data from the data register bytes
 	/// @param data Bytes read from DATA_REGISTER onwards
@@ -790,16 +862,29 @@ private:
 	bool parseData(const uint8_t *const data, const uint8_t length, SensorData &result) const;
 
 	/// @brief Read the average of SELF_TEST_SAMPLE_COUNT samples
+	/// @param average Average raw data of the samples
 	/// @return True if successful
 	bool readSelfTestAverageRawData(RawSensorData &average) const;
 
-	/// @brief True if the gyro self-test response is at least the minimum
+	/// @brief Check a gyro axis' self-test response
+	/// @param response Self-test output minus normal output (LSB at ±250 dps)
+	/// @return True if the response is at least SELF_TEST_GYRO_MIN_RESPONSE
 	static bool validGyroSelfTestResponse(const int32_t response);
 
-	/// @brief True if the accel self-test response is within the limits
+	/// @brief Check an accel axis' self-test response
+	/// @param response Self-test output minus normal output (LSB at ±2 g)
+	/// @return True if the response is from SELF_TEST_ACCEL_MIN_RESPONSE to SELF_TEST_ACCEL_MAX_RESPONSE
 	static bool validAccelSelfTestResponse(const int32_t response);
 
+	/// @brief Check the self-test temperature
+	/// @param rawTemperature Average raw temperature (TEMP_OUT)
+	/// @return True if the temperature is from SELF_TEST_TEMPERATURE_MIN to SELF_TEST_TEMPERATURE_MAX
+	static bool validSelfTestTemperature(const int16_t rawTemperature);
+
 	/// @brief Apply the self-test configuration and read the averages without and then with self-test enabled
+	/// @brief Note: The self-test configuration (±250 dps, ±2 g) is left set, with self-test turned off
+	/// @param normal Average raw data with self-test disabled
+	/// @param testing Average raw data with self-test enabled
 	/// @return True if successful
 	bool readSelfTestAverages(RawSensorData &normal, RawSensorData &testing);
 
@@ -809,9 +894,12 @@ protected:
 	bool startWire() override;
 
 public:
+	/// @param i2cWire The I2C bus the device is connected to
+	/// @param i2cAddr The device's I2C address, set by the AD0 pin
 	explicit MPU6500_I2C(TwoWire &i2cWire = Wire, const I2CAddress i2cAddr = I2CAddress::Addr_0x68);
 
-	/// @brief Set power mode
+	/// @brief Set power mode. Waits for the sensors to start up, except when entering sleep mode
+	/// @tparam MODE The power mode (see PowerMode for which sensors each mode runs)
 	/// @return True if successful
 	template <PowerMode MODE>
 	bool setPowerMode()
@@ -826,9 +914,11 @@ public:
 
 			pwrMgmt2 &= ~(PWR_MGMT_2_DISABLE_GYRO | PWR_MGMT_2_DISABLE_ACCEL); // DISABLE_XG/YG/ZG/XA/YA/ZA - set to 0 (all on)
 
-			if constexpr ((MODE == PowerMode::Standby) || (MODE == PowerMode::Gyroscope))
+			if constexpr ((MODE == PowerMode::Standby) ||
+						  (MODE == PowerMode::Gyroscope))
 				pwrMgmt2 |= PWR_MGMT_2_DISABLE_ACCEL; // DISABLE_XA/YA/ZA - set to 1 (accelerometer off)
-			else if constexpr ((MODE == PowerMode::LowPowerAccelerometer) || (MODE == PowerMode::LowNoiseAccelerometer))
+			else if constexpr ((MODE == PowerMode::LowPowerAccelerometer) ||
+							   (MODE == PowerMode::LowNoiseAccelerometer))
 				pwrMgmt2 |= PWR_MGMT_2_DISABLE_GYRO; // DISABLE_XG/YG/ZG - set to 1 (gyro off)
 			else if constexpr (MODE == PowerMode::SixAxis)
 			{
@@ -873,10 +963,12 @@ public:
 	}
 
 	/// @brief Enable or disable the temperature sensor
+	/// @param enable True = enabled, false = disabled (saves power)
 	/// @return True if successful
 	bool enableTemperatureSensor(const bool enable);
 
-	/// @brief Set gyroscope full scale range
+	/// @brief Set gyroscope full scale range. The data scaling used by readData is updated to match
+	/// @tparam RANGE The full scale range (±250 to ±2000 dps)
 	/// @return True if successful
 	template <GyroFullScale RANGE>
 	bool setGyroFullScale()
@@ -918,7 +1010,8 @@ public:
 		return true;
 	}
 
-	/// @brief Set accelerometer full scale range
+	/// @brief Set accelerometer full scale range. The data scaling used by readData is updated to match
+	/// @tparam RANGE The full scale range (±2 to ±16 g)
 	/// @return True if successful
 	template <AccelFullScale RANGE>
 	bool setAccelFullScale()
@@ -961,6 +1054,7 @@ public:
 	}
 
 	/// @brief Set gyroscope (and temperature sensor) filter
+	/// @tparam FILTER The filter bandwidth (see GyroFilter for each one's sample rate and delay)
 	/// @return True if successful
 	template <GyroFilter FILTER>
 	bool setGyroFilter()
@@ -1013,6 +1107,7 @@ public:
 	}
 
 	/// @brief Set accelerometer filter
+	/// @tparam FILTER The filter bandwidth (see AccelFilter for each one's rate and delay)
 	/// @return True if successful
 	template <AccelFilter FILTER>
 	bool setAccelFilter()
@@ -1047,6 +1142,7 @@ public:
 
 	/// @brief Set sample rate divider (SAMPLE_RATE = 1kHz / (1 + divider))
 	/// @brief Note: Only effective when the gyro DLPF runs at 1 kHz (Bandwidth_184Hz to Bandwidth_5Hz)
+	/// @param divider SMPLRT_DIV (0 to 255, giving 1 kHz to 3.9 Hz)
 	/// @return True if successful
 	bool setSampleRateDivider(const uint8_t divider)
 	{
@@ -1054,6 +1150,7 @@ public:
 	}
 
 	/// @brief Set the accelerometer output data rate used in low-power accelerometer mode
+	/// @tparam RATE The output data rate (0.24 to 500 Hz)
 	/// @return True if successful
 	template <LowPowerAccelRate RATE>
 	bool setLowPowerAccelRate()
@@ -1108,9 +1205,12 @@ public:
 	/// @return True if successful
 	bool setAccelOffsets(const int16_t x, const int16_t y, const int16_t z);
 
-	/// @brief Get accel offsets (may hold factory values)
+	/// @brief Read accel offsets (may hold factory values)
+	/// @param x XA_OFFS (-16384 to 16383)
+	/// @param y YA_OFFS (-16384 to 16383)
+	/// @param z ZA_OFFS (-16384 to 16383)
 	/// @return True if successful
-	bool getAccelOffsets(int16_t &x, int16_t &y, int16_t &z) const;
+	bool readAccelOffsets(int16_t &x, int16_t &y, int16_t &z) const;
 
 	/// @brief Set INT pin behaviour, shared by all interrupts
 	/// @param activeHigh True = active high, false = active low
@@ -1122,24 +1222,28 @@ public:
 							const bool clearOnAnyRead = false);
 
 	/// @brief Enable the raw sensor data ready interrupt on the INT pin
+	/// @param enable True = enabled, false = disabled
 	/// @return True if successful
 	bool enableDataReadyInterrupt(const bool enable);
 
 	/// @brief Enable the FIFO overflow interrupt on the INT pin
+	/// @param enable True = enabled, false = disabled
 	/// @return True if successful
 	bool enableFifoOverflowInterrupt(const bool enable);
 
 	/// @brief Enable the FSYNC pin as an interrupt source, and its interrupt on the INT pin
+	/// @param enable True = enabled, false = disabled
 	/// @param activeHigh True = FSYNC active high, false = active low
 	/// @return True if successful
 	bool enableFsyncInterrupt(const bool enable, const bool activeHigh = true);
 
 	/// @brief Read the interrupt status. Reading clears it
-	/// @param status Populated with the interrupt status
+	/// @param status The interrupt status
 	/// @return True if successful
 	bool getInterruptStatus(InterruptStatus &status) const;
 
-	/// @brief Set the auxiliary I2C bus mode
+	/// @brief Set the auxiliary I2C bus mode. The I2C master and bypass are never on together
+	/// @tparam MODE Disabled, PassThrough (aux bus connected to the primary bus) or Master (MPU-6500 drives the aux bus)
 	/// @return True if successful
 	template <AuxI2CMode MODE>
 	bool setAuxI2CMode()
@@ -1183,6 +1287,7 @@ public:
 	}
 
 	/// @brief Set the I2C master clock speed
+	/// @tparam CLOCK The aux bus clock speed (258 to 500 kHz)
 	/// @return True if successful
 	template <I2CMasterClock CLOCK>
 	bool setI2CMasterClock()
@@ -1240,6 +1345,7 @@ public:
 	bool setI2CMasterConfig(const bool waitForExternalSensor = false, const bool stopBetweenReads = false, const bool multiMaster = false, const bool delayShadow = false);
 
 	/// @brief Set a slave to read from an aux I2C device at the sample rate, storing the data in the EXT_SENS_DATA registers
+	/// @tparam SLAVE The slave to use (Slave0 to Slave3)
 	/// @param address I2C address of the aux device
 	/// @param reg Register to start reading from
 	/// @param length Number of bytes to read (1 to 15)
@@ -1270,10 +1376,11 @@ public:
 			ctrl																		   // I2C_SLVx_CTRL
 		};
 
-		return writeReg(REGISTERS.regAddr, data, sizeof(data)); // ADDR, REG and CTRL are contiguous
+		return writeReg(REGISTERS.regAddr, data, sizeof(data));
 	}
 
 	/// @brief Set a slave to write a byte to an aux I2C device at the sample rate
+	/// @tparam SLAVE The slave to use (Slave0 to Slave3)
 	/// @param address I2C address of the aux device
 	/// @param reg Register to write to
 	/// @param data Byte to write
@@ -1299,10 +1406,12 @@ public:
 			ctrl												  // I2C_SLVx_CTRL
 		};
 
-		return writeReg(REGISTERS.regAddr, setup, sizeof(setup)); // ADDR, REG and CTRL are contiguous
+		return writeReg(REGISTERS.regAddr, setup, sizeof(setup));
 	}
 
 	/// @brief Enable or disable a slave's transfers at the sample rate
+	/// @tparam SLAVE The slave (Slave0 to Slave3)
+	/// @param enable True = enabled, false = disabled
 	/// @return True if successful
 	template <AuxSlave SLAVE>
 	bool enableSlave(const bool enable)
@@ -1328,6 +1437,8 @@ public:
 	bool setI2CMasterDelay(const uint8_t delay);
 
 	/// @brief Enable or disable the I2C master delay for a slave
+	/// @tparam SLAVE The slave (Slave0 to Slave4)
+	/// @param enable True = accessed every (1 + I2C_MST_DLY) samples (see setI2CMasterDelay), false = every sample
 	/// @return True if successful
 	template <AuxSlave SLAVE>
 	bool enableSlaveDelay(const bool enable)
@@ -1361,7 +1472,7 @@ public:
 	/// @brief Read the data stored by slaves 0 to 3
 	/// @param data Buffer for the data
 	/// @param index First EXT_SENS_DATA register to read (0 to 23)
-	/// @param length Number of bytes to read
+	/// @param length Number of bytes to read (1 to 24 - index)
 	/// @return True if successful
 	bool readExternalSensorData(uint8_t *const data, const uint8_t index, const uint8_t length) const;
 
@@ -1383,15 +1494,17 @@ public:
 
 	/// @brief Enable the slave 4 transfer complete interrupt
 	/// @brief Note: The register map says this also needs I2C_MST_INT_EN in INT_ENABLE, which the MPU-6500 does not have
+	/// @param enable True = enabled, false = disabled
 	/// @return True if successful
 	bool enableSlave4DoneInterrupt(const bool enable);
 
 	/// @brief Read the I2C master status. Reading clears it
-	/// @param status Populated with the I2C master status
+	/// @param status The I2C master status
 	/// @return True if successful
 	bool getI2CMasterStatus(I2CMasterStatus &status) const;
 
 	/// @brief Enable or disable FIFO operation
+	/// @param enable True = enabled, false = disabled
 	/// @return True if successful
 	bool enableFifo(const bool enable);
 
@@ -1400,6 +1513,7 @@ public:
 	bool resetFifo();
 
 	/// @brief Set what happens when the FIFO is full
+	/// @tparam MODE Overwrite (new data replaces the oldest) or StopWhenFull (new data is not written)
 	/// @return True if successful
 	template <FifoMode MODE>
 	bool setFifoMode()
@@ -1419,10 +1533,12 @@ public:
 	}
 
 	/// @brief Set which data is written to the FIFO at the sample rate
+	/// @param sources The data to write to the FIFO. Sources set to false are not written
 	/// @return True if successful
 	bool setFifoSources(const FifoSources &sources);
 
 	/// @brief Read the number of bytes in the FIFO
+	/// @param count Number of bytes in the FIFO (0 to FIFO_SIZE)
 	/// @return True if successful
 	bool readFifoCount(uint16_t &count) const;
 
@@ -1437,6 +1553,9 @@ public:
 	bool reset();
 
 	/// @brief Reset the digital signal paths. The sensor data registers are not cleared (see resetSensors)
+	/// @param gyro True = reset the gyro signal path
+	/// @param accel True = reset the accel signal path
+	/// @param temperature True = reset the temperature signal path
 	/// @return True if successful
 	bool resetSignalPaths(const bool gyro, const bool accel, const bool temperature);
 
@@ -1454,6 +1573,7 @@ public:
 	bool resetDmp();
 
 	/// @brief Read raw data from a single burst read, so all values are from the same sample
+	/// @param raw Raw accel, temperature and gyro data (LSB at the current full scale ranges)
 	/// @return True if successful
 	bool readRawData(RawSensorData &raw) const;
 
@@ -1462,9 +1582,11 @@ public:
 	/// @return True if successful
 	bool readData(SensorData &result) const;
 
-	/// @brief Check the gyro and accel are working (not their accuracy). Takes about half a second and the device must be still
-	/// @brief The gyro and accel must be running (SixAxis). The configuration is restored afterwards
-	/// @return True if every axis responds within the limits
+	/// @brief Check the gyro, accel and temperature sensor are working (not their accuracy). Takes about half a second,
+	/// @brief and the device must be still
+	/// @brief Note: The self-test turns everything on and changes the configuration, and nothing is restored.
+	/// @brief It's therefore recommended to configure the device after the self-test
+	/// @return True if every axis and the temperature are within the limits
 	bool normalSelfTest();
 
 	/// @brief Enable wake-on-motion: the INT pin signals when any accel axis exceeds the threshold
@@ -1515,6 +1637,11 @@ public:
 	bool enableLowPower();
 
 	/// @brief Set up the device in one call. The defaults suit general motion and orientation tracking
+	/// @tparam POWER_MODE Power mode (default both sensors on)
+	/// @tparam GYRO_RANGE Gyro full scale range (default ±500 dps)
+	/// @tparam ACCEL_RANGE Accel full scale range (default ±4 g)
+	/// @tparam GYRO_FILTER Gyro filter bandwidth (default 41 Hz)
+	/// @tparam ACCEL_FILTER Accel filter bandwidth (default 41 Hz)
 	/// @param sampleRateDivider Sample rate = 1 kHz / (1 + divider). The default gives 100 Hz
 	/// @return True if successful
 	template <PowerMode POWER_MODE = PowerMode::SixAxis,

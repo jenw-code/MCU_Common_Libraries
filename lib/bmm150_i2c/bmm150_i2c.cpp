@@ -7,7 +7,7 @@ bool BMM150_I2C::startWire()
 	return I2C_Master::startWire() &&		   // The device must respond at its address before any of its registers are used
 		   initialiseSuspended() &&			   //
 		   setPowerMode<PowerMode::Sleep>() && // Take the device out of suspend mode (its power-up state)
-		   (getChipID() == IC_ID_VALUE) &&	   // Confirm the device is a BMM150
+		   (readChipID() == IC_ID_VALUE) &&	   // Confirm the device is a BMM150
 		   populateTrimData();				   // The factory trim never changes, so it's read once here and used to compensate every reading
 }
 
@@ -106,8 +106,12 @@ bool BMM150_I2C::softReset()
 	return true;
 }
 
-bool BMM150_I2C::runNormalSelfTest()
+bool BMM150_I2C::normalSelfTest()
 {
+	// The test runs in sleep mode
+	if (!setPowerMode<PowerMode::Sleep>())
+		return false;
+
 	uint8_t value = 0;
 	if (!readReg(REG_OP_MODE, &value, 1))
 		return false;
@@ -149,37 +153,6 @@ bool BMM150_I2C::runNormalSelfTest()
 	return ((result[X_INDEX] & DATA_X_LSB_BIT_X_SELF_TEST) != 0) &&
 		   ((result[Y_INDEX] & DATA_Y_LSB_BIT_Y_SELF_TEST) != 0) &&
 		   ((result[Z_INDEX] & DATA_Z_LSB_BIT_Z_SELF_TEST) != 0);
-}
-
-bool BMM150_I2C::normalSelfTest()
-{
-	// Save whether the device is measuring continuously, as the test runs in sleep mode
-	bool prevActive = false;
-	if (!_suspended)
-	{
-		// Opmode register is only accessible once out of suspend mode
-		uint8_t value = 0;
-		if (!readReg(REG_OP_MODE, &value, 1))
-			return false;
-
-		prevActive = ((value & OP_MODE_OPMODE_BITS_MASK) == OP_MODE_OPMODE_NORMAL);
-	}
-
-	const bool prevSuspended = _suspended;
-	if (!setPowerMode<PowerMode::Sleep>())
-		return false;
-
-	const bool passed = runNormalSelfTest();
-
-	// Restore the power mode even if the test failed. Sleep and forced mode are left
-	// in sleep mode (forced mode returns to sleep once complete)
-	bool restored = true;
-	if (prevSuspended)
-		restored = setPowerMode<PowerMode::Suspend>();
-	else if (prevActive)
-		restored = setPowerMode<PowerMode::Active>();
-
-	return passed && restored;
 }
 
 bool BMM150_I2C::enableChannels(const bool channelX, const bool channelY, const bool channelZ)

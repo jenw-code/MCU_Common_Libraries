@@ -82,6 +82,8 @@ protected:
 	virtual bool startWire();
 
 public:
+	/// @param i2cAddr The device's 7-bit I2C address
+	/// @param i2cWire The I2C bus the device is connected to
 	explicit I2C_Master(const uint8_t i2cAddr, TwoWire &i2cWire = Wire);
 
 	/// @brief Start the device
@@ -89,11 +91,15 @@ public:
 	/// @return True if the device started
 	bool begin(const uint8_t retryCount = 3);
 
+	/// @brief Get the device's I2C address
+	/// @return The 7-bit I2C address
 	uint8_t address() const
 	{
 		return _address;
 	}
 
+	/// @brief Get whether the device has started
+	/// @return True if begin succeeded
 	bool started() const
 	{
 		return _wireStarted;
