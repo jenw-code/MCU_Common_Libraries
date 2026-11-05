@@ -73,6 +73,17 @@ public:
 
 	static constexpr int16_t MAGNETIC_FIELD_OVERFLOW = -32768; // Compensated value when the axis overflowed or the data is invalid
 
+	// A gravity sensor axis, with its sign, used to align the gravity sensor's orientation with the BMM150's
+	enum class AxisOrientation : uint8_t
+	{
+		PlusX = 0,
+		MinusX = 1,
+		PlusY = 2,
+		MinusY = 3,
+		PlusZ = 4,
+		MinusZ = 5
+	};
+
 private:
 	static constexpr uint8_t IC_ID_VALUE = 0x32; // Value returned from the BMM150 when reading its chip ID
 
@@ -283,6 +294,76 @@ private:
 	/// @param rhall Hall resistance (14-bit unsigned). 0 = not measured, so z can't be compensated
 	/// @return Compensated z-axis magnetic field (µT), or MAGNETIC_FIELD_OVERFLOW
 	int16_t compensateZ(const int16_t rawZ, const uint16_t rhall) const;
+
+	/// @brief Calculate a heading from two horizontal components
+	/// @param x Component along the x-axis (any scale, as long as it matches y)
+	/// @param y Component along the y-axis
+	/// @param degrees Heading in whole degrees, rounded down (0 to 359): 0 along the y-axis, increasing towards the x-axis
+	/// @return True if successful. False if both components are 0 (heading undefined)
+	static bool calculateHeading(const float x, const float y, uint16_t &degrees);
+
+	/// @brief Check whether an orientation uses the gravity sensor's x-axis, ignoring its sign
+	/// @tparam ORIENTATION The axis orientation
+	/// @return True if it uses the x-axis
+	template <AxisOrientation ORIENTATION>
+	static constexpr bool xAxis()
+	{
+		return (ORIENTATION == AxisOrientation::PlusX) ||
+			   (ORIENTATION == AxisOrientation::MinusX);
+	}
+
+	/// @brief Check whether an orientation uses the gravity sensor's y-axis, ignoring its sign
+	/// @tparam ORIENTATION The axis orientation
+	/// @return True if it uses the y-axis
+	template <AxisOrientation ORIENTATION>
+	static constexpr bool yAxis()
+	{
+		return (ORIENTATION == AxisOrientation::PlusY) ||
+			   (ORIENTATION == AxisOrientation::MinusY);
+	}
+
+	/// @brief Check whether an orientation uses the gravity sensor's z-axis, ignoring its sign
+	/// @tparam ORIENTATION The axis orientation
+	/// @return True if it uses the z-axis
+	template <AxisOrientation ORIENTATION>
+	static constexpr bool zAxis()
+	{
+		return (ORIENTATION == AxisOrientation::PlusZ) ||
+			   (ORIENTATION == AxisOrientation::MinusZ);
+	}
+
+	/// @brief Get gravity along one of the BMM150's axes
+	/// @tparam ORIENTATION The gravity sensor axis (and sign) that lines up with the BMM150 axis
+	/// @param gravityX Gravity sensor x-axis reading
+	/// @param gravityY Gravity sensor y-axis reading
+	/// @param gravityZ Gravity sensor z-axis reading
+	/// @return Gravity along the BMM150 axis
+	template <AxisOrientation ORIENTATION>
+	static constexpr float mapGravityAxis(const int16_t gravityX, const int16_t gravityY, const int16_t gravityZ)
+	{
+		float gravity = 0.0f;
+		if constexpr (xAxis<ORIENTATION>())
+			gravity = static_cast<float>(gravityX);
+		else if constexpr (yAxis<ORIENTATION>())
+			gravity = static_cast<float>(gravityY);
+		else
+			gravity = static_cast<float>(gravityZ);
+
+		if constexpr ((ORIENTATION == AxisOrientation::MinusX) ||
+					  (ORIENTATION == AxisOrientation::MinusY) ||
+					  (ORIENTATION == AxisOrientation::MinusZ))
+			gravity = -gravity;
+
+		return gravity;
+	}
+
+	/// @brief Calculate a tilt-compensated heading, with gravity already in the BMM150's axes
+	/// @param degrees Heading in degrees (0 to 359): 0 along the y-axis, increasing towards the x-axis
+	/// @param gravityX Gravity along the BMM150's x-axis (any units). Positive along an axis pointing up
+	/// @param gravityY Gravity along the BMM150's y-axis
+	/// @param gravityZ Gravity along the BMM150's z-axis
+	/// @return True if successful. False if any axis overflowed, there's no gravity, or the heading is undefined
+	bool readTiltCompensatedHeading(uint16_t &degrees, const float gravityX, const float gravityY, const float gravityZ) const;
 
 	/// @brief Check whether the interrupt axes include the x-axis
 	/// @param axes The interrupt axes
@@ -626,6 +707,31 @@ public:
 	/// @param degrees Heading in degrees (0 to 359)
 	/// @return True if successful. False if x or y overflowed, or there is no horizontal field
 	bool readHeading(uint16_t &degrees) const;
+
+	/// @brief Calculate a tilt-compensated compass heading, using gravity from another sensor (e.g. the MPU-6500's accelerometer)
+	/// @brief Uses the same direction as readHeading: 0 degrees along the y-axis, increasing towards the x-axis
+	/// @tparam X_ORIENTATION Gravity sensor axis (and sign) that lines up with the BMM150's x-axis
+	/// @tparam Y_ORIENTATION Gravity sensor axis (and sign) that lines up with the BMM150's y-axis
+	/// @tparam Z_ORIENTATION Gravity sensor axis (and sign) that lines up with the BMM150's z-axis
+	/// @param degrees Heading in degrees (0 to 359)
+	/// @param gravityX Gravity sensor x-axis reading, as read (any units, e.g. mg). Reads positive along an axis pointing up
+	/// @param gravityY Gravity sensor y-axis reading, as read
+	/// @param gravityZ Gravity sensor z-axis reading, as read
+	/// @return True if successful. False if any axis overflowed, there's no gravity, or the heading is undefined
+	template <AxisOrientation X_ORIENTATION, AxisOrientation Y_ORIENTATION, AxisOrientation Z_ORIENTATION>
+	bool readHeading(uint16_t &degrees, const int16_t gravityX, const int16_t gravityY, const int16_t gravityZ) const
+	{
+		// The tilt maths needs each gravity sensor axis used exactly once. With three orientations,
+		// that means every axis must be used
+		static_assert(xAxis<X_ORIENTATION>() || xAxis<Y_ORIENTATION>() || xAxis<Z_ORIENTATION>(), "The gravity sensor's x-axis must be used");
+		static_assert(yAxis<X_ORIENTATION>() || yAxis<Y_ORIENTATION>() || yAxis<Z_ORIENTATION>(), "The gravity sensor's y-axis must be used");
+		static_assert(zAxis<X_ORIENTATION>() || zAxis<Y_ORIENTATION>() || zAxis<Z_ORIENTATION>(), "The gravity sensor's z-axis must be used");
+
+		return readTiltCompensatedHeading(degrees,
+										  mapGravityAxis<X_ORIENTATION>(gravityX, gravityY, gravityZ),
+										  mapGravityAxis<Y_ORIENTATION>(gravityX, gravityY, gravityZ),
+										  mapGravityAxis<Z_ORIENTATION>(gravityX, gravityY, gravityZ));
+	}
 
 	/// @brief Set up the device in one call. The defaults are the datasheet's general purpose (Regular) preset, measuring continuously
 	/// @tparam POWER_MODE Power mode (default Active, measuring continuously)

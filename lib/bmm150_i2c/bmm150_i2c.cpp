@@ -460,6 +460,22 @@ bool BMM150_I2C::readData(int16_t &x, int16_t &y, int16_t &z) const
 	return parseData(data, DATA_LENGTH, x, y, z);
 }
 
+bool BMM150_I2C::calculateHeading(const float x, const float y, uint16_t &degrees)
+{
+	if ((x == 0.0f) && (y == 0.0f))
+		return false; // No horizontal field, heading is undefined
+
+	constexpr float DEGREES_PER_RADIAN = 180.0f / PI;
+
+	// Angle from the y-axis towards the x-axis (-180 to 180 degrees)
+	float angle = atan2f(x, y) * DEGREES_PER_RADIAN;
+	if (angle < 0.0f)
+		angle += 360.0f;
+
+	degrees = static_cast<uint16_t>(angle); // Whole degrees, rounded down (0 to 359)
+	return true;
+}
+
 bool BMM150_I2C::readHeading(uint16_t &degrees) const
 {
 	int16_t x = 0;
@@ -468,32 +484,39 @@ bool BMM150_I2C::readHeading(uint16_t &degrees) const
 	if (!readData(x, y, z) || (x == MAGNETIC_FIELD_OVERFLOW) || (y == MAGNETIC_FIELD_OVERFLOW))
 		return false;
 
-	const uint16_t absX = abs(x);
-	const uint16_t absY = abs(y);
-	if ((absX == 0) && (absY == 0))
-		return false; // No horizontal field, heading is undefined
+	return calculateHeading(static_cast<float>(x), static_cast<float>(y), degrees);
+}
 
-	// atan(r) ≈ 45r + 16r(1 - r) degrees, where r is the smaller axis / larger axis (0 to 1,
-	// scaled by HEADING_RATIO_SCALE)
-	constexpr uint16_t HEADING_RATIO_SCALE = 256; // Fixed point scale for the axis ratio (1.0 = 256)
-	const uint16_t ratio = (static_cast<uint32_t>(min(absX, absY)) * HEADING_RATIO_SCALE) / max(absX, absY);
-	const uint16_t linearTerm = 45 * ratio;																					   // 45r
-	const uint16_t correctionTerm = (static_cast<uint32_t>(16) * ratio * (HEADING_RATIO_SCALE - ratio)) / HEADING_RATIO_SCALE; // 16r(1 - r)
-	const uint8_t octant = (linearTerm + correctionTerm) / HEADING_RATIO_SCALE;												   // Angle from the larger axis (0 to 45 degrees)
-	// Angle from the y-axis towards the x-axis (0 to 90 degrees)
-	const uint8_t quadrant = (absX <= absY) ? octant : (90 - octant);
+bool BMM150_I2C::readTiltCompensatedHeading(uint16_t &degrees, const float gravityX, const float gravityY, const float gravityZ) const
+{
+	int16_t x = 0;
+	int16_t y = 0;
+	int16_t z = 0;
+	if (!readData(x, y, z) ||
+		(x == MAGNETIC_FIELD_OVERFLOW) ||
+		(y == MAGNETIC_FIELD_OVERFLOW) ||
+		(z == MAGNETIC_FIELD_OVERFLOW))
+		return false;
 
-	// Place the angle in the quadrant given by the signs of x and y
-	if ((x >= 0) && (y >= 0))
-		degrees = quadrant;
-	else if ((x >= 0) && (y < 0))
-		degrees = 180 - quadrant;
-	else if ((x < 0) && (y < 0))
-		degrees = 180 + quadrant;
-	else if (quadrant == 0)
-		degrees = 0; // x is negative but too small to register, so the heading is along the y-axis
-	else
-		degrees = 360 - quadrant;
+	const float floatX = static_cast<float>(x);
+	const float floatY = static_cast<float>(y);
+	const float floatZ = static_cast<float>(z);
 
-	return true;
+	// The size of gravity, used below to scale east up to the same scale as north
+	const float gravityMagnitude = sqrtf((gravityX * gravityX) + (gravityY * gravityY) + (gravityZ * gravityZ));
+	if (gravityMagnitude == 0.0f)
+		return false; // No gravity, so the tilt is unknown
+
+	// East is perpendicular to both the magnetic field and gravity (magnetic field x gravity)
+	const float eastX = (floatY * gravityZ) - (floatZ * gravityY);
+	const float eastY = (floatZ * gravityX) - (floatX * gravityZ);
+	const float eastZ = (floatX * gravityY) - (floatY * gravityX);
+
+	// North is perpendicular to both gravity and east (gravity x east). Only its y component is needed.
+	// It comes out gravityMagnitude times larger than east
+	const float northY = (gravityZ * eastX) - (gravityX * eastZ);
+	const float scaledEastY = gravityMagnitude * eastY;
+
+	// Negated so the angle increases towards the x-axis, as in the flat readHeading
+	return calculateHeading(-scaledEastY, northY, degrees);
 }
