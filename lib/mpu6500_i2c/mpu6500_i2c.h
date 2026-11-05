@@ -159,6 +159,28 @@ public:
 		bool slave3 = false;	  // SLV_3_FIFO_EN (in I2C_MST_CTRL)
 	};
 
+	struct RawSensorData final
+	{
+		int16_t accelX = 0;
+		int16_t accelY = 0;
+		int16_t accelZ = 0;
+		int16_t temperature = 0;
+		int16_t gyroX = 0;
+		int16_t gyroY = 0;
+		int16_t gyroZ = 0;
+	};
+
+	struct SensorData final
+	{
+		int16_t accelX = 0;		 // mg
+		int16_t accelY = 0;		 // mg
+		int16_t accelZ = 0;		 // mg
+		int32_t temperature = 0; // m°C
+		int32_t gyroX = 0;		 // mdps
+		int32_t gyroY = 0;		 // mdps
+		int32_t gyroZ = 0;		 // mdps
+	};
+
 private:
 	static constexpr uint8_t IC_ID_VALUE = 0x70; // Value returned from the MPU-6500 when reading WHO_AM_I
 
@@ -174,6 +196,7 @@ private:
 	static constexpr uint8_t REG_ACCEL_CONFIG = 0x1C;		// Accelerometer configuration
 	static constexpr uint8_t REG_ACCEL_CONFIG_2 = 0x1D;		// Accelerometer configuration 2
 	static constexpr uint8_t REG_LP_ACCEL_ODR = 0x1E;		// Low power accelerometer ODR control
+	static constexpr uint8_t REG_WOM_THR = 0x1F;			// Wake-on-motion threshold (4 mg per LSB)
 	static constexpr uint8_t REG_FIFO_EN = 0x23;			// FIFO enable
 	static constexpr uint8_t REG_I2C_MST_CTRL = 0x24;		// I2C master control
 	static constexpr uint8_t REG_I2C_SLV0_ADDR = 0x25;		// I2C slave 0 address
@@ -197,6 +220,20 @@ private:
 	static constexpr uint8_t REG_INT_PIN_CFG = 0x37;		// INT pin / bypass enable configuration
 	static constexpr uint8_t REG_INT_ENABLE = 0x38;			// Interrupt enable
 	static constexpr uint8_t REG_INT_STATUS = 0x3A;			// Interrupt status (cleared on read)
+	static constexpr uint8_t REG_ACCEL_XOUT_H = 0x3B;		// Accel X, high byte
+	static constexpr uint8_t REG_ACCEL_XOUT_L = 0x3C;		// Accel X, low byte
+	static constexpr uint8_t REG_ACCEL_YOUT_H = 0x3D;		// Accel Y, high byte
+	static constexpr uint8_t REG_ACCEL_YOUT_L = 0x3E;		// Accel Y, low byte
+	static constexpr uint8_t REG_ACCEL_ZOUT_H = 0x3F;		// Accel Z, high byte
+	static constexpr uint8_t REG_ACCEL_ZOUT_L = 0x40;		// Accel Z, low byte
+	static constexpr uint8_t REG_TEMP_OUT_H = 0x41;			// Temperature, high byte
+	static constexpr uint8_t REG_TEMP_OUT_L = 0x42;			// Temperature, low byte
+	static constexpr uint8_t REG_GYRO_XOUT_H = 0x43;		// Gyro X, high byte
+	static constexpr uint8_t REG_GYRO_XOUT_L = 0x44;		// Gyro X, low byte
+	static constexpr uint8_t REG_GYRO_YOUT_H = 0x45;		// Gyro Y, high byte
+	static constexpr uint8_t REG_GYRO_YOUT_L = 0x46;		// Gyro Y, low byte
+	static constexpr uint8_t REG_GYRO_ZOUT_H = 0x47;		// Gyro Z, high byte
+	static constexpr uint8_t REG_GYRO_ZOUT_L = 0x48;		// Gyro Z, low byte
 	static constexpr uint8_t REG_EXT_SENS_DATA_00 = 0x49;	// External sensor data 00 (00 to 23 are 0x49 to 0x60)
 	static constexpr uint8_t REG_I2C_SLV0_DO = 0x63;		// I2C slave 0 data out
 	static constexpr uint8_t REG_I2C_SLV1_DO = 0x64;		// I2C slave 1 data out
@@ -204,6 +241,7 @@ private:
 	static constexpr uint8_t REG_I2C_SLV3_DO = 0x66;		// I2C slave 3 data out
 	static constexpr uint8_t REG_I2C_MST_DELAY_CTRL = 0x67; // I2C master delay control
 	static constexpr uint8_t REG_SIGNAL_PATH_RESET = 0x68;	// Signal path reset
+	static constexpr uint8_t REG_ACCEL_INTEL_CTRL = 0x69;	// Accelerometer interrupt control (wake-on-motion)
 	static constexpr uint8_t REG_USER_CTRL = 0x6A;			// User control
 	static constexpr uint8_t REG_PWR_MGMT_1 = 0x6B;			// Power management 1
 	static constexpr uint8_t REG_PWR_MGMT_2 = 0x6C;			// Power management 2
@@ -491,6 +529,16 @@ private:
 	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_RESERVED_6 = (1 << 6); // Reserved
 	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_RESERVED_7 = (1 << 7); // Reserved
 
+	// Accelerometer interrupt control bits
+	static constexpr uint8_t ACCEL_INTEL_CTRL_BIT_RESERVED_0 = (1 << 0);	   // Reserved
+	static constexpr uint8_t ACCEL_INTEL_CTRL_BIT_RESERVED_1 = (1 << 1);	   // Reserved
+	static constexpr uint8_t ACCEL_INTEL_CTRL_BIT_RESERVED_2 = (1 << 2);	   // Reserved
+	static constexpr uint8_t ACCEL_INTEL_CTRL_BIT_RESERVED_3 = (1 << 3);	   // Reserved
+	static constexpr uint8_t ACCEL_INTEL_CTRL_BIT_RESERVED_4 = (1 << 4);	   // Reserved
+	static constexpr uint8_t ACCEL_INTEL_CTRL_BIT_RESERVED_5 = (1 << 5);	   // Reserved
+	static constexpr uint8_t ACCEL_INTEL_CTRL_BIT_ACCEL_INTEL_MODE = (1 << 6); // ACCEL_INTEL_MODE: 1 = Compare the current sample with the previous sample
+	static constexpr uint8_t ACCEL_INTEL_CTRL_BIT_ACCEL_INTEL_EN = (1 << 7);   // ACCEL_INTEL_EN: 1 = Wake-on-motion detection logic enabled
+
 	// User control bits
 	static constexpr uint8_t USER_CTRL_BIT_SIG_COND_RST = (1 << 0); // SIG_COND_RST: 1 = Reset all sensor signal paths and clear sensor registers
 	static constexpr uint8_t USER_CTRL_BIT_I2C_MST_RST = (1 << 1);	// I2C_MST_RST: 1 = Reset I2C master (only when hung), auto-cleared
@@ -550,6 +598,26 @@ private:
 
 	static constexpr uint8_t START_UP_TIME_MILLIS = 35; // Longest sensor start-up time from sleep mode (gyroscope)
 	static constexpr uint8_t RESET_TIME_MILLIS = 100;	// Time for a device reset to complete
+
+	static constexpr uint8_t WOM_THRESHOLD_MG_PER_LSB = 4; // Wake-on-motion threshold resolution
+	static constexpr uint16_t WOM_THRESHOLD_MAX_MG = 1020; // Wake-on-motion threshold maximum
+
+	static constexpr uint8_t DATA_REGISTER = REG_ACCEL_XOUT_H;						 // First data register (accel X high byte)
+	static constexpr uint8_t DATA_LENGTH = (REG_GYRO_ZOUT_L - REG_ACCEL_XOUT_H) + 1; // Number of data registers (accel X to gyro Z)
+
+	// Data scaling. Fixed point factors avoid a division for every sample
+	static constexpr uint16_t MG_PER_G = 1000;			   // Accel is scaled from g to mg
+	static constexpr uint8_t SCALE_SHIFT = 8;			   // Fixed point shift used by the gyro and temperature factors
+	static constexpr uint8_t ACCEL_SHIFT_2G = 14;		   // 16384 LSB/g
+	static constexpr uint8_t ACCEL_SHIFT_4G = 13;		   // 8192 LSB/g
+	static constexpr uint8_t ACCEL_SHIFT_8G = 12;		   // 4096 LSB/g
+	static constexpr uint8_t ACCEL_SHIFT_16G = 11;		   // 2048 LSB/g
+	static constexpr uint16_t GYRO_FACTOR_250DPS = 1954;   // 131 LSB/dps (1000 x 256 / 131)
+	static constexpr uint16_t GYRO_FACTOR_500DPS = 3908;   // 65.5 LSB/dps (1000 x 256 / 65.5)
+	static constexpr uint16_t GYRO_FACTOR_1000DPS = 7805;  // 32.8 LSB/dps (1000 x 256 / 32.8)
+	static constexpr uint16_t GYRO_FACTOR_2000DPS = 15610; // 16.4 LSB/dps (1000 x 256 / 16.4)
+	static constexpr uint16_t TEMPERATURE_FACTOR = 767;	   // 333.87 LSB/°C (1000 x 256 / 333.87)
+	static constexpr uint16_t TEMPERATURE_OFFSET = 21000;  // Room temperature offset (21 °C in m°C)
 
 	static constexpr uint8_t EXT_SENS_DATA_COUNT = 24; // Number of EXT_SENS_DATA registers (00 to 23)
 
@@ -630,11 +698,18 @@ private:
 	template <AuxSlave>
 	static constexpr bool ALWAYS_FALSE = false; // Fails a static_assert for an unimplemented enum value
 
+	uint8_t _accelShift = ACCEL_SHIFT_2G;	   // Set from the device by initialiseFullScales, kept up to date by setAccelFullScale
+	uint16_t _gyroFactor = GYRO_FACTOR_250DPS; // Set from the device by initialiseFullScales, kept up to date by setGyroFullScale
+
 	/// @brief Return 8 bit device ID
 	uint8_t getWhoAmI() const
 	{
 		return readReg(REG_WHO_AM_I);
 	}
+
+	/// @brief Set the cached data scaling from the device's full scale ranges (e.g. after an MCU-only reset)
+	/// @return True if successful
+	bool initialiseFullScales();
 
 	/// @brief Write one axis' 15-bit accel offset, keeping the reserved bit in the L register
 	/// @return True if successful
@@ -669,6 +744,16 @@ private:
 	/// @param registerDisabled True = transfer data only, without writing the register address
 	/// @return True if the transfer completed without a NACK
 	bool transferSlave4(const uint8_t addr, const uint8_t reg, const uint8_t data, const bool registerDisabled);
+
+	/// @brief Parse raw data from the data register bytes (DATA_REGISTER onwards, DATA_LENGTH bytes)
+	void parseRawData(const uint8_t *const data, RawSensorData &raw) const;
+
+	/// @brief Parse scaled data from the data register bytes
+	/// @param data Bytes read from DATA_REGISTER onwards
+	/// @param length Number of bytes in data (must be DATA_LENGTH)
+	/// @param result Accel (mg), temperature (m°C) and gyro (mdps)
+	/// @return True if successful
+	bool parseData(const uint8_t *const data, const uint8_t length, SensorData &result) const;
 
 protected:
 	/// @brief Initialise MPU6500_I2C
@@ -739,6 +824,10 @@ public:
 		return true;
 	}
 
+	/// @brief Enable or disable the temperature sensor
+	/// @return True if successful
+	bool enableTemperatureSensor(const bool enable);
+
 	/// @brief Set gyroscope full scale range
 	/// @return True if successful
 	template <GyroFullScale RANGE>
@@ -750,18 +839,35 @@ public:
 
 		value &= ~GYRO_CONFIG_GYRO_FS_SEL_BITS_MASK; // GYRO_FS_SEL - clear bits
 
+		uint16_t gyroFactor = 0;
 		if constexpr (RANGE == GyroFullScale::Range_250DPS)
+		{
 			value |= GYRO_CONFIG_GYRO_FS_SEL_250;
+			gyroFactor = GYRO_FACTOR_250DPS;
+		}
 		else if constexpr (RANGE == GyroFullScale::Range_500DPS)
+		{
 			value |= GYRO_CONFIG_GYRO_FS_SEL_500;
+			gyroFactor = GYRO_FACTOR_500DPS;
+		}
 		else if constexpr (RANGE == GyroFullScale::Range_1000DPS)
+		{
 			value |= GYRO_CONFIG_GYRO_FS_SEL_1000;
+			gyroFactor = GYRO_FACTOR_1000DPS;
+		}
 		else if constexpr (RANGE == GyroFullScale::Range_2000DPS)
+		{
 			value |= GYRO_CONFIG_GYRO_FS_SEL_2000;
+			gyroFactor = GYRO_FACTOR_2000DPS;
+		}
 		else
 			return false;
 
-		return writeReg(REG_GYRO_CONFIG, &value);
+		if (!writeReg(REG_GYRO_CONFIG, &value))
+			return false;
+
+		_gyroFactor = gyroFactor;
+		return true;
 	}
 
 	/// @brief Set accelerometer full scale range
@@ -775,18 +881,35 @@ public:
 
 		value &= ~ACCEL_CONFIG_ACCEL_FS_SEL_BITS_MASK; // ACCEL_FS_SEL - clear bits
 
+		uint8_t accelShift = 0;
 		if constexpr (RANGE == AccelFullScale::Range_2G)
+		{
 			value |= ACCEL_CONFIG_ACCEL_FS_SEL_2G;
+			accelShift = ACCEL_SHIFT_2G;
+		}
 		else if constexpr (RANGE == AccelFullScale::Range_4G)
+		{
 			value |= ACCEL_CONFIG_ACCEL_FS_SEL_4G;
+			accelShift = ACCEL_SHIFT_4G;
+		}
 		else if constexpr (RANGE == AccelFullScale::Range_8G)
+		{
 			value |= ACCEL_CONFIG_ACCEL_FS_SEL_8G;
+			accelShift = ACCEL_SHIFT_8G;
+		}
 		else if constexpr (RANGE == AccelFullScale::Range_16G)
+		{
 			value |= ACCEL_CONFIG_ACCEL_FS_SEL_16G;
+			accelShift = ACCEL_SHIFT_16G;
+		}
 		else
 			return false;
 
-		return writeReg(REG_ACCEL_CONFIG, &value);
+		if (!writeReg(REG_ACCEL_CONFIG, &value))
+			return false;
+
+		_accelShift = accelShift;
+		return true;
 	}
 
 	/// @brief Set gyroscope (and temperature sensor) filter
@@ -1281,4 +1404,78 @@ public:
 	/// @brief Reset the DMP. Fails if the DMP is enabled, as the reset only takes effect while it is disabled
 	/// @return True if successful
 	bool resetDmp();
+
+	/// @brief Read raw data from a single burst read, so all values are from the same sample
+	/// @return True if successful
+	bool readRawData(RawSensorData &raw) const;
+
+	/// @brief Read scaled data from a single burst read, so all values are from the same sample
+	/// @param result Accel (mg), temperature (m°C) and gyro (mdps)
+	/// @return True if successful
+	bool readData(SensorData &result) const;
+
+	/// @brief Enable wake-on-motion: the INT pin signals when any accel axis exceeds the threshold
+	/// @brief See enableLowPower for waiting on motion at low power
+	/// @tparam THRESHOLD_MG Motion threshold in mg (0 to 1020, multiple of 4)
+	/// @return True if successful
+	template <uint16_t THRESHOLD_MG>
+	bool enableWakeOnMotion()
+	{
+		static_assert(THRESHOLD_MG <= WOM_THRESHOLD_MAX_MG, "THRESHOLD_MG must be in the range of 0 to 1020");
+		static_assert((THRESHOLD_MG % WOM_THRESHOLD_MG_PER_LSB) == 0, "THRESHOLD_MG must be a multiple of 4 mg");
+
+		// Wake-on-motion interrupt on the INT pin
+		{
+			uint8_t value = 0;
+			if (!readReg(REG_INT_ENABLE, &value, 1))
+				return false;
+
+			value |= INT_ENABLE_BIT_WOM_EN; // WOM_EN - set to 1 (enabled)
+			if (!writeReg(REG_INT_ENABLE, &value))
+				return false;
+		}
+
+		// Motion detection logic, comparing each sample with the previous one
+		{
+			uint8_t value = 0;
+			if (!readReg(REG_ACCEL_INTEL_CTRL, &value, 1))
+				return false;
+
+			value |= (ACCEL_INTEL_CTRL_BIT_ACCEL_INTEL_EN | ACCEL_INTEL_CTRL_BIT_ACCEL_INTEL_MODE); // ACCEL_INTEL_EN, ACCEL_INTEL_MODE - set to 1
+			if (!writeReg(REG_ACCEL_INTEL_CTRL, &value))
+				return false;
+		}
+
+		// Motion threshold
+		uint8_t threshold = THRESHOLD_MG / WOM_THRESHOLD_MG_PER_LSB;
+		return writeReg(REG_WOM_THR, &threshold);
+	}
+
+	/// @brief Disable wake-on-motion (detection logic and interrupt). The power mode is left unchanged
+	/// @return True if successful
+	bool disableWakeOnMotion();
+
+	/// @brief Run at low power: low-power accelerometer mode (gyro off, accel cycling at 15.63 Hz),
+	/// @brief accel DLPF bypassed (the only setting low-power mode supports) and the temperature sensor off
+	/// @brief Note: Each setting can be changed back individually
+	/// @return True if successful
+	bool enableLowPower();
+
+	/// @brief Set up the device in one call. The defaults suit general motion and orientation tracking
+	/// @param sampleRateDivider Sample rate = 1 kHz / (1 + divider). The default gives 100 Hz
+	/// @return True if successful
+	template <PowerMode POWER_MODE = PowerMode::SixAxis,
+			  GyroFullScale GYRO_RANGE = GyroFullScale::Range_500DPS,
+			  AccelFullScale ACCEL_RANGE = AccelFullScale::Range_4G,
+			  GyroFilter GYRO_FILTER = GyroFilter::Bandwidth_41Hz,
+			  AccelFilter ACCEL_FILTER = AccelFilter::Bandwidth_41Hz>
+	bool quickSetup(const uint8_t sampleRateDivider = 9)
+	{
+		return setPowerMode<POWER_MODE>() &&
+			   setGyroFullScale<GYRO_RANGE>() &&
+			   setAccelFullScale<ACCEL_RANGE>() &&
+			   setGyroFilter<GYRO_FILTER>() &&
+			   setAccelFilter<ACCEL_FILTER>() &&
+			   setSampleRateDivider(sampleRateDivider);
+	}
 };

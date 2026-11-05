@@ -5,7 +5,68 @@ MPU6500_I2C::MPU6500_I2C(TwoWire &i2cWire, const I2CAddress i2cAddr) : I2C_Maste
 bool MPU6500_I2C::startWire()
 {
 	return I2C_Master::startWire() &&
-		   (getWhoAmI() == IC_ID_VALUE);
+		   (getWhoAmI() == IC_ID_VALUE) &&
+		   initialiseFullScales();
+}
+
+bool MPU6500_I2C::initialiseFullScales()
+{
+	uint8_t gyroConfig = 0;
+	uint8_t accelConfig = 0;
+	if (!readReg(REG_GYRO_CONFIG, &gyroConfig, 1) || !readReg(REG_ACCEL_CONFIG, &accelConfig, 1))
+		return false;
+
+	switch (gyroConfig & GYRO_CONFIG_GYRO_FS_SEL_BITS_MASK)
+	{
+	case GYRO_CONFIG_GYRO_FS_SEL_250:
+		_gyroFactor = GYRO_FACTOR_250DPS;
+		break;
+	case GYRO_CONFIG_GYRO_FS_SEL_500:
+		_gyroFactor = GYRO_FACTOR_500DPS;
+		break;
+	case GYRO_CONFIG_GYRO_FS_SEL_1000:
+		_gyroFactor = GYRO_FACTOR_1000DPS;
+		break;
+	case GYRO_CONFIG_GYRO_FS_SEL_2000:
+		_gyroFactor = GYRO_FACTOR_2000DPS;
+		break;
+	default:
+		return false;
+	}
+
+	switch (accelConfig & ACCEL_CONFIG_ACCEL_FS_SEL_BITS_MASK)
+	{
+	case ACCEL_CONFIG_ACCEL_FS_SEL_2G:
+		_accelShift = ACCEL_SHIFT_2G;
+		break;
+	case ACCEL_CONFIG_ACCEL_FS_SEL_4G:
+		_accelShift = ACCEL_SHIFT_4G;
+		break;
+	case ACCEL_CONFIG_ACCEL_FS_SEL_8G:
+		_accelShift = ACCEL_SHIFT_8G;
+		break;
+	case ACCEL_CONFIG_ACCEL_FS_SEL_16G:
+		_accelShift = ACCEL_SHIFT_16G;
+		break;
+	default:
+		return false;
+	}
+
+	return true;
+}
+
+bool MPU6500_I2C::enableTemperatureSensor(const bool enable)
+{
+	uint8_t value = 0;
+	if (!readReg(REG_PWR_MGMT_1, &value, 1))
+		return false;
+
+	if (enable)
+		value &= ~PWR_MGMT_1_BIT_TEMP_DIS; // TEMP_DIS - set to 0 (temperature sensor enabled)
+	else
+		value |= PWR_MGMT_1_BIT_TEMP_DIS; // TEMP_DIS - set to 1 (temperature sensor disabled)
+
+	return writeReg(REG_PWR_MGMT_1, &value);
 }
 
 bool MPU6500_I2C::setGyroOffsets(const int16_t x, const int16_t y, const int16_t z)
@@ -489,4 +550,86 @@ bool MPU6500_I2C::resetDmp()
 	value |= USER_CTRL_BIT_DMP_RST; // DMP_RST - set to 1 (reset DMP, auto-cleared)
 
 	return writeReg(REG_USER_CTRL, &value);
+}
+
+void MPU6500_I2C::parseRawData(const uint8_t *const data, RawSensorData &raw) const
+{
+	raw.accelX = static_cast<int16_t>((data[REG_ACCEL_XOUT_H - DATA_REGISTER] << 8) | data[REG_ACCEL_XOUT_L - DATA_REGISTER]);
+	raw.accelY = static_cast<int16_t>((data[REG_ACCEL_YOUT_H - DATA_REGISTER] << 8) | data[REG_ACCEL_YOUT_L - DATA_REGISTER]);
+	raw.accelZ = static_cast<int16_t>((data[REG_ACCEL_ZOUT_H - DATA_REGISTER] << 8) | data[REG_ACCEL_ZOUT_L - DATA_REGISTER]);
+	raw.temperature = static_cast<int16_t>((data[REG_TEMP_OUT_H - DATA_REGISTER] << 8) | data[REG_TEMP_OUT_L - DATA_REGISTER]);
+	raw.gyroX = static_cast<int16_t>((data[REG_GYRO_XOUT_H - DATA_REGISTER] << 8) | data[REG_GYRO_XOUT_L - DATA_REGISTER]);
+	raw.gyroY = static_cast<int16_t>((data[REG_GYRO_YOUT_H - DATA_REGISTER] << 8) | data[REG_GYRO_YOUT_L - DATA_REGISTER]);
+	raw.gyroZ = static_cast<int16_t>((data[REG_GYRO_ZOUT_H - DATA_REGISTER] << 8) | data[REG_GYRO_ZOUT_L - DATA_REGISTER]);
+}
+
+bool MPU6500_I2C::readRawData(RawSensorData &raw) const
+{
+	uint8_t data[DATA_LENGTH];
+	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
+		return false;
+
+	parseRawData(data, raw);
+	return true;
+}
+
+bool MPU6500_I2C::parseData(const uint8_t *const data, const uint8_t length, SensorData &result) const
+{
+	if (length != DATA_LENGTH)
+		return false;
+
+	RawSensorData raw;
+	parseRawData(data, raw);
+
+	result.accelX = static_cast<int16_t>((static_cast<int32_t>(raw.accelX) * MG_PER_G) >> _accelShift);
+	result.accelY = static_cast<int16_t>((static_cast<int32_t>(raw.accelY) * MG_PER_G) >> _accelShift);
+	result.accelZ = static_cast<int16_t>((static_cast<int32_t>(raw.accelZ) * MG_PER_G) >> _accelShift);
+	result.temperature = ((static_cast<int32_t>(raw.temperature) * TEMPERATURE_FACTOR) >> SCALE_SHIFT) + TEMPERATURE_OFFSET;
+	result.gyroX = (static_cast<int32_t>(raw.gyroX) * _gyroFactor) >> SCALE_SHIFT;
+	result.gyroY = (static_cast<int32_t>(raw.gyroY) * _gyroFactor) >> SCALE_SHIFT;
+	result.gyroZ = (static_cast<int32_t>(raw.gyroZ) * _gyroFactor) >> SCALE_SHIFT;
+
+	return true;
+}
+
+bool MPU6500_I2C::readData(SensorData &result) const
+{
+	uint8_t data[DATA_LENGTH];
+	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
+		return false;
+
+	return parseData(data, DATA_LENGTH, result);
+}
+
+bool MPU6500_I2C::disableWakeOnMotion()
+{
+	// Wake-on-motion interrupt
+	{
+		uint8_t value = 0;
+		if (!readReg(REG_INT_ENABLE, &value, 1))
+			return false;
+
+		value &= ~INT_ENABLE_BIT_WOM_EN; // WOM_EN - set to 0 (disabled)
+		if (!writeReg(REG_INT_ENABLE, &value))
+			return false;
+	}
+
+	// Motion detection logic
+	{
+		uint8_t value = 0;
+		if (!readReg(REG_ACCEL_INTEL_CTRL, &value, 1))
+			return false;
+
+		value &= ~(ACCEL_INTEL_CTRL_BIT_ACCEL_INTEL_EN | ACCEL_INTEL_CTRL_BIT_ACCEL_INTEL_MODE); // ACCEL_INTEL_EN, ACCEL_INTEL_MODE - set to 0
+		return writeReg(REG_ACCEL_INTEL_CTRL, &value);
+	}
+}
+
+bool MPU6500_I2C::enableLowPower()
+{
+	// The low-power rate and filter are set before entering low-power mode, as the datasheet does
+	return enableTemperatureSensor(false) &&
+		   setAccelFilter<AccelFilter::Bandwidth_1130Hz>() &&
+		   setLowPowerAccelRate<LowPowerAccelRate::Rate_15_63Hz>() &&
+		   setPowerMode<PowerMode::LowPowerAccelerometer>();
 }
