@@ -126,21 +126,55 @@ public:
 		Slave4 = 4 // Single transfers only (see writeSlave4 / readSlave4)
 	};
 
+	struct I2CMasterStatus final
+	{
+		bool slave0Nack = false;	  // I2C_SLV0_NACK: Slave 0 received a NACK
+		bool slave1Nack = false;	  // I2C_SLV1_NACK: Slave 1 received a NACK
+		bool slave2Nack = false;	  // I2C_SLV2_NACK: Slave 2 received a NACK
+		bool slave3Nack = false;	  // I2C_SLV3_NACK: Slave 3 received a NACK
+		bool slave4Nack = false;	  // I2C_SLV4_NACK: Slave 4 received a NACK
+		bool lostArbitration = false; // I2C_LOST_ARB: Lost arbitration of the aux I2C bus
+		bool slave4Done = false;	  // I2C_SLV4_DONE: Slave 4 transfer complete
+		bool passThrough = false;	  // PASS_THROUGH: FSYNC interrupt occurred
+	};
+
+	static constexpr uint16_t FIFO_SIZE = 512; // FIFO size in bytes
+
+	enum class FifoMode : uint8_t
+	{
+		Overwrite = 0,	 // When full, new data replaces the oldest (default)
+		StopWhenFull = 1 // When full, new data is not written
+	};
+
+	struct FifoSources final
+	{
+		bool temperature = false; // TEMP_OUT
+		bool gyroX = false;		  // GYRO_XOUT
+		bool gyroY = false;		  // GYRO_YOUT
+		bool gyroZ = false;		  // GYRO_ZOUT
+		bool accel = false;		  // ACCEL (X, Y and Z)
+		bool slave0 = false;	  // SLV_0
+		bool slave1 = false;	  // SLV_1
+		bool slave2 = false;	  // SLV_2
+		bool slave3 = false;	  // SLV_3_FIFO_EN (in I2C_MST_CTRL)
+	};
+
 private:
 	static constexpr uint8_t IC_ID_VALUE = 0x70; // Value returned from the MPU-6500 when reading WHO_AM_I
 
-	static constexpr uint8_t REG_XG_OFFSET_H = 0x13;		// X_OFFS_USR [15:8]
-	static constexpr uint8_t REG_XG_OFFSET_L = 0x14;		// X_OFFS_USR [7:0]
-	static constexpr uint8_t REG_YG_OFFSET_H = 0x15;		// Y_OFFS_USR [15:8]
-	static constexpr uint8_t REG_YG_OFFSET_L = 0x16;		// Y_OFFS_USR [7:0]
-	static constexpr uint8_t REG_ZG_OFFSET_H = 0x17;		// Z_OFFS_USR [15:8]
-	static constexpr uint8_t REG_ZG_OFFSET_L = 0x18;		// Z_OFFS_USR [7:0]
+	static constexpr uint8_t REG_XG_OFFSET_H = 0x13;		// X gyro offset (X_OFFS_USR), high byte
+	static constexpr uint8_t REG_XG_OFFSET_L = 0x14;		// X gyro offset (X_OFFS_USR), low byte
+	static constexpr uint8_t REG_YG_OFFSET_H = 0x15;		// Y gyro offset (Y_OFFS_USR), high byte
+	static constexpr uint8_t REG_YG_OFFSET_L = 0x16;		// Y gyro offset (Y_OFFS_USR), low byte
+	static constexpr uint8_t REG_ZG_OFFSET_H = 0x17;		// Z gyro offset (Z_OFFS_USR), high byte
+	static constexpr uint8_t REG_ZG_OFFSET_L = 0x18;		// Z gyro offset (Z_OFFS_USR), low byte
 	static constexpr uint8_t REG_SMPLRT_DIV = 0x19;			// Sample rate divider (SAMPLE_RATE = 1kHz / (1 + SMPLRT_DIV))
 	static constexpr uint8_t REG_CONFIG = 0x1A;				// Configuration
 	static constexpr uint8_t REG_GYRO_CONFIG = 0x1B;		// Gyroscope configuration
 	static constexpr uint8_t REG_ACCEL_CONFIG = 0x1C;		// Accelerometer configuration
 	static constexpr uint8_t REG_ACCEL_CONFIG_2 = 0x1D;		// Accelerometer configuration 2
 	static constexpr uint8_t REG_LP_ACCEL_ODR = 0x1E;		// Low power accelerometer ODR control
+	static constexpr uint8_t REG_FIFO_EN = 0x23;			// FIFO enable
 	static constexpr uint8_t REG_I2C_MST_CTRL = 0x24;		// I2C master control
 	static constexpr uint8_t REG_I2C_SLV0_ADDR = 0x25;		// I2C slave 0 address
 	static constexpr uint8_t REG_I2C_SLV0_REG = 0x26;		// I2C slave 0 register address to begin transfer
@@ -169,16 +203,20 @@ private:
 	static constexpr uint8_t REG_I2C_SLV2_DO = 0x65;		// I2C slave 2 data out
 	static constexpr uint8_t REG_I2C_SLV3_DO = 0x66;		// I2C slave 3 data out
 	static constexpr uint8_t REG_I2C_MST_DELAY_CTRL = 0x67; // I2C master delay control
+	static constexpr uint8_t REG_SIGNAL_PATH_RESET = 0x68;	// Signal path reset
 	static constexpr uint8_t REG_USER_CTRL = 0x6A;			// User control
 	static constexpr uint8_t REG_PWR_MGMT_1 = 0x6B;			// Power management 1
 	static constexpr uint8_t REG_PWR_MGMT_2 = 0x6C;			// Power management 2
+	static constexpr uint8_t REG_FIFO_COUNT_H = 0x72;		// FIFO count, high byte (reading latches both bytes)
+	static constexpr uint8_t REG_FIFO_COUNT_L = 0x73;		// FIFO count, low byte
+	static constexpr uint8_t REG_FIFO_R_W = 0x74;			// FIFO read / write
 	static constexpr uint8_t REG_WHO_AM_I = 0x75;			// Device identity register
-	static constexpr uint8_t REG_XA_OFFSET_H = 0x77;		// XA_OFFS [14:7]
-	static constexpr uint8_t REG_XA_OFFSET_L = 0x78;		// XA_OFFS [6:0]
-	static constexpr uint8_t REG_YA_OFFSET_H = 0x7A;		// YA_OFFS [14:7]
-	static constexpr uint8_t REG_YA_OFFSET_L = 0x7B;		// YA_OFFS [6:0]
-	static constexpr uint8_t REG_ZA_OFFSET_H = 0x7D;		// ZA_OFFS [14:7]
-	static constexpr uint8_t REG_ZA_OFFSET_L = 0x7E;		// ZA_OFFS [6:0]
+	static constexpr uint8_t REG_XA_OFFSET_H = 0x77;		// X accel offset (XA_OFFS), high byte
+	static constexpr uint8_t REG_XA_OFFSET_L = 0x78;		// X accel offset (XA_OFFS), low byte
+	static constexpr uint8_t REG_YA_OFFSET_H = 0x7A;		// Y accel offset (YA_OFFS), high byte
+	static constexpr uint8_t REG_YA_OFFSET_L = 0x7B;		// Y accel offset (YA_OFFS), low byte
+	static constexpr uint8_t REG_ZA_OFFSET_H = 0x7D;		// Z accel offset (ZA_OFFS), high byte
+	static constexpr uint8_t REG_ZA_OFFSET_L = 0x7E;		// Z accel offset (ZA_OFFS), low byte
 
 	// Configuration bits
 	static constexpr uint8_t CONFIG_BIT_DLPF_CFG_0 = (1 << 0);	   // DLPF_CFG <0>: Gyro / temperature DLPF bit 0
@@ -297,6 +335,16 @@ private:
 	static constexpr uint8_t LP_ACCEL_ODR_LPOSC_CLKSEL_500HZ = LP_ACCEL_ODR_BIT_LPOSC_CLKSEL_3 | LP_ACCEL_ODR_BIT_LPOSC_CLKSEL_1 | LP_ACCEL_ODR_BIT_LPOSC_CLKSEL_0;	  // 1011: 500 Hz
 																																									  // 1100 to 1111: Reserved
 
+	// FIFO enable bits
+	static constexpr uint8_t FIFO_EN_BIT_SLV_0 = (1 << 0);	   // SLV_0: 1 = Slave 0 EXT_SENS_DATA written to FIFO at the sample rate
+	static constexpr uint8_t FIFO_EN_BIT_SLV_1 = (1 << 1);	   // SLV_1: 1 = Slave 1 EXT_SENS_DATA written to FIFO at the sample rate
+	static constexpr uint8_t FIFO_EN_BIT_SLV_2 = (1 << 2);	   // SLV_2: 1 = Slave 2 EXT_SENS_DATA written to FIFO at the sample rate
+	static constexpr uint8_t FIFO_EN_BIT_ACCEL = (1 << 3);	   // ACCEL: 1 = Accel X, Y and Z written to FIFO at the sample rate
+	static constexpr uint8_t FIFO_EN_BIT_GYRO_ZOUT = (1 << 4); // GYRO_ZOUT: 1 = Gyro Z written to FIFO at the sample rate
+	static constexpr uint8_t FIFO_EN_BIT_GYRO_YOUT = (1 << 5); // GYRO_YOUT: 1 = Gyro Y written to FIFO at the sample rate
+	static constexpr uint8_t FIFO_EN_BIT_GYRO_XOUT = (1 << 6); // GYRO_XOUT: 1 = Gyro X written to FIFO at the sample rate
+	static constexpr uint8_t FIFO_EN_BIT_TEMP_OUT = (1 << 7);  // TEMP_OUT: 1 = Temperature written to FIFO at the sample rate
+
 	// I2C master control bits
 	static constexpr uint8_t I2C_MST_CTRL_BIT_I2C_MST_CLK_0 = (1 << 0); // I2C_MST_CLK <0>: I2C master clock bit 0
 	static constexpr uint8_t I2C_MST_CTRL_BIT_I2C_MST_CLK_1 = (1 << 1); // I2C_MST_CLK <1>: I2C master clock bit 1
@@ -308,7 +356,10 @@ private:
 	static constexpr uint8_t I2C_MST_CTRL_BIT_MULT_MST_EN = (1 << 7);	// MULT_MST_EN: 1 = Multi-master capability enabled
 
 	// I2C master clock values
-	static constexpr uint8_t I2C_MST_CTRL_I2C_MST_CLK_BITS_MASK = I2C_MST_CTRL_BIT_I2C_MST_CLK_3 | I2C_MST_CTRL_BIT_I2C_MST_CLK_2 | I2C_MST_CTRL_BIT_I2C_MST_CLK_1 | I2C_MST_CTRL_BIT_I2C_MST_CLK_0;
+	static constexpr uint8_t I2C_MST_CTRL_I2C_MST_CLK_BITS_MASK = I2C_MST_CTRL_BIT_I2C_MST_CLK_3 |
+																  I2C_MST_CTRL_BIT_I2C_MST_CLK_2 |
+																  I2C_MST_CTRL_BIT_I2C_MST_CLK_1 |
+																  I2C_MST_CTRL_BIT_I2C_MST_CLK_0;
 	static constexpr uint8_t I2C_MST_CTRL_I2C_MST_CLK_348KHZ = 0;																								 // 0000: 348 kHz (divider 23)
 	static constexpr uint8_t I2C_MST_CTRL_I2C_MST_CLK_333KHZ = I2C_MST_CTRL_BIT_I2C_MST_CLK_0;																	 // 0001: 333 kHz (divider 24)
 	static constexpr uint8_t I2C_MST_CTRL_I2C_MST_CLK_320KHZ = I2C_MST_CTRL_BIT_I2C_MST_CLK_1;																	 // 0010: 320 kHz (divider 25)
@@ -327,55 +378,55 @@ private:
 	static constexpr uint8_t I2C_MST_CTRL_I2C_MST_CLK_364KHZ = I2C_MST_CTRL_I2C_MST_CLK_BITS_MASK;																 // 1111: 364 kHz (divider 22)
 
 	// I2C slave 0 address bits
-	static constexpr uint8_t I2C_SLV0_ADDR_BITS_I2C_ID_0 = 0b1111111;	// I2C_ID_0 [6:0]: Slave 0 I2C address
+	static constexpr uint8_t I2C_SLV0_ADDR_BITS_I2C_ID_0 = 0b1111111;	// I2C_ID_0: Slave 0 I2C address
 	static constexpr uint8_t I2C_SLV0_ADDR_BIT_I2C_SLV0_RNW = (1 << 7); // I2C_SLV0_RNW: 1 = Read, 0 = Write
 
 	// I2C slave 0 control bits
-	static constexpr uint8_t I2C_SLV0_CTRL_BITS_I2C_SLV0_LENG = 0b1111;		// I2C_SLV0_LENG [3:0]: Number of bytes to read
+	static constexpr uint8_t I2C_SLV0_CTRL_BITS_I2C_SLV0_LENG = 0b1111;		// I2C_SLV0_LENG: Number of bytes to read
 	static constexpr uint8_t I2C_SLV0_CTRL_BIT_I2C_SLV0_GRP = (1 << 4);		// I2C_SLV0_GRP: 1 = Registers 1 and 2 grouped, 0 = Registers 0 and 1 grouped
 	static constexpr uint8_t I2C_SLV0_CTRL_BIT_I2C_SLV0_REG_DIS = (1 << 5); // I2C_SLV0_REG_DIS: 1 = Transfer data only, no register address
 	static constexpr uint8_t I2C_SLV0_CTRL_BIT_I2C_SLV0_BYTE_SW = (1 << 6); // I2C_SLV0_BYTE_SW: 1 = Swap bytes of each word
 	static constexpr uint8_t I2C_SLV0_CTRL_BIT_I2C_SLV0_EN = (1 << 7);		// I2C_SLV0_EN: 1 = Read from slave 0 at the sample rate
 
 	// I2C slave 1 address bits
-	static constexpr uint8_t I2C_SLV1_ADDR_BITS_I2C_ID_1 = 0b1111111;	// I2C_ID_1 [6:0]: Slave 1 I2C address
+	static constexpr uint8_t I2C_SLV1_ADDR_BITS_I2C_ID_1 = 0b1111111;	// I2C_ID_1: Slave 1 I2C address
 	static constexpr uint8_t I2C_SLV1_ADDR_BIT_I2C_SLV1_RNW = (1 << 7); // I2C_SLV1_RNW: 1 = Read, 0 = Write
 
 	// I2C slave 1 control bits
-	static constexpr uint8_t I2C_SLV1_CTRL_BITS_I2C_SLV1_LENG = 0b1111;		// I2C_SLV1_LENG [3:0]: Number of bytes to read
+	static constexpr uint8_t I2C_SLV1_CTRL_BITS_I2C_SLV1_LENG = 0b1111;		// I2C_SLV1_LENG: Number of bytes to read
 	static constexpr uint8_t I2C_SLV1_CTRL_BIT_I2C_SLV1_GRP = (1 << 4);		// I2C_SLV1_GRP: 1 = Registers 1 and 2 grouped, 0 = Registers 0 and 1 grouped
 	static constexpr uint8_t I2C_SLV1_CTRL_BIT_I2C_SLV1_REG_DIS = (1 << 5); // I2C_SLV1_REG_DIS: 1 = Transfer data only, no register address
 	static constexpr uint8_t I2C_SLV1_CTRL_BIT_I2C_SLV1_BYTE_SW = (1 << 6); // I2C_SLV1_BYTE_SW: 1 = Swap bytes of each word
 	static constexpr uint8_t I2C_SLV1_CTRL_BIT_I2C_SLV1_EN = (1 << 7);		// I2C_SLV1_EN: 1 = Read from slave 1 at the sample rate
 
 	// I2C slave 2 address bits
-	static constexpr uint8_t I2C_SLV2_ADDR_BITS_I2C_ID_2 = 0b1111111;	// I2C_ID_2 [6:0]: Slave 2 I2C address
+	static constexpr uint8_t I2C_SLV2_ADDR_BITS_I2C_ID_2 = 0b1111111;	// I2C_ID_2: Slave 2 I2C address
 	static constexpr uint8_t I2C_SLV2_ADDR_BIT_I2C_SLV2_RNW = (1 << 7); // I2C_SLV2_RNW: 1 = Read, 0 = Write
 
 	// I2C slave 2 control bits
-	static constexpr uint8_t I2C_SLV2_CTRL_BITS_I2C_SLV2_LENG = 0b1111;		// I2C_SLV2_LENG [3:0]: Number of bytes to read
+	static constexpr uint8_t I2C_SLV2_CTRL_BITS_I2C_SLV2_LENG = 0b1111;		// I2C_SLV2_LENG: Number of bytes to read
 	static constexpr uint8_t I2C_SLV2_CTRL_BIT_I2C_SLV2_GRP = (1 << 4);		// I2C_SLV2_GRP: 1 = Registers 1 and 2 grouped, 0 = Registers 0 and 1 grouped
 	static constexpr uint8_t I2C_SLV2_CTRL_BIT_I2C_SLV2_REG_DIS = (1 << 5); // I2C_SLV2_REG_DIS: 1 = Transfer data only, no register address
 	static constexpr uint8_t I2C_SLV2_CTRL_BIT_I2C_SLV2_BYTE_SW = (1 << 6); // I2C_SLV2_BYTE_SW: 1 = Swap bytes of each word
 	static constexpr uint8_t I2C_SLV2_CTRL_BIT_I2C_SLV2_EN = (1 << 7);		// I2C_SLV2_EN: 1 = Read from slave 2 at the sample rate
 
 	// I2C slave 3 address bits
-	static constexpr uint8_t I2C_SLV3_ADDR_BITS_I2C_ID_3 = 0b1111111;	// I2C_ID_3 [6:0]: Slave 3 I2C address
+	static constexpr uint8_t I2C_SLV3_ADDR_BITS_I2C_ID_3 = 0b1111111;	// I2C_ID_3: Slave 3 I2C address
 	static constexpr uint8_t I2C_SLV3_ADDR_BIT_I2C_SLV3_RNW = (1 << 7); // I2C_SLV3_RNW: 1 = Read, 0 = Write
 
 	// I2C slave 3 control bits
-	static constexpr uint8_t I2C_SLV3_CTRL_BITS_I2C_SLV3_LENG = 0b1111;		// I2C_SLV3_LENG [3:0]: Number of bytes to read
+	static constexpr uint8_t I2C_SLV3_CTRL_BITS_I2C_SLV3_LENG = 0b1111;		// I2C_SLV3_LENG: Number of bytes to read
 	static constexpr uint8_t I2C_SLV3_CTRL_BIT_I2C_SLV3_GRP = (1 << 4);		// I2C_SLV3_GRP: 1 = Registers 1 and 2 grouped, 0 = Registers 0 and 1 grouped
 	static constexpr uint8_t I2C_SLV3_CTRL_BIT_I2C_SLV3_REG_DIS = (1 << 5); // I2C_SLV3_REG_DIS: 1 = Transfer data only, no register address (register map prints I2C_SLV0_REG_DIS)
 	static constexpr uint8_t I2C_SLV3_CTRL_BIT_I2C_SLV3_BYTE_SW = (1 << 6); // I2C_SLV3_BYTE_SW: 1 = Swap bytes of each word
 	static constexpr uint8_t I2C_SLV3_CTRL_BIT_I2C_SLV3_EN = (1 << 7);		// I2C_SLV3_EN: 1 = Read from slave 3 at the sample rate
 
 	// I2C slave 4 address bits
-	static constexpr uint8_t I2C_SLV4_ADDR_BITS_I2C_ID_4 = 0b1111111;	// I2C_ID_4 [6:0]: Slave 4 I2C address
+	static constexpr uint8_t I2C_SLV4_ADDR_BITS_I2C_ID_4 = 0b1111111;	// I2C_ID_4: Slave 4 I2C address
 	static constexpr uint8_t I2C_SLV4_ADDR_BIT_I2C_SLV4_RNW = (1 << 7); // I2C_SLV4_RNW: 1 = Read, 0 = Write
 
 	// I2C slave 4 control bits
-	static constexpr uint8_t I2C_SLV4_CTRL_BITS_I2C_MST_DLY = 0b11111;		// I2C_MST_DLY [4:0]: Delayed slaves accessed every (1 + I2C_MST_DLY) samples
+	static constexpr uint8_t I2C_SLV4_CTRL_BITS_I2C_MST_DLY = 0b11111;		// I2C_MST_DLY: Delayed slaves accessed every (1 + I2C_MST_DLY) samples
 	static constexpr uint8_t I2C_SLV4_CTRL_BIT_I2C_SLV4_REG_DIS = (1 << 5); // I2C_SLV4_REG_DIS: 1 = Transfer data only, no register address
 	static constexpr uint8_t I2C_SLV4_CTRL_BIT_SLV4_DONE_INT_EN = (1 << 6); // SLV4_DONE_INT_EN: 1 = Slave 4 transfer complete causes an interrupt
 	static constexpr uint8_t I2C_SLV4_CTRL_BIT_I2C_SLV4_EN = (1 << 7);		// I2C_SLV4_EN: 1 = Start single transfer, cleared when complete
@@ -430,6 +481,16 @@ private:
 	static constexpr uint8_t I2C_MST_DELAY_CTRL_BIT_RESERVED_6 = (1 << 6);		// Reserved
 	static constexpr uint8_t I2C_MST_DELAY_CTRL_BIT_DELAY_ES_SHADOW = (1 << 7); // DELAY_ES_SHADOW: 1 = External sensor data shadowed only when all received
 
+	// Signal path reset bits
+	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_TEMP_RST = (1 << 0);	  // TEMP_RST: 1 = Reset temperature signal path (sensor registers not cleared)
+	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_ACCEL_RST = (1 << 1);  // ACCEL_RST: 1 = Reset accel signal path (sensor registers not cleared)
+	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_GYRO_RST = (1 << 2);	  // GYRO_RST: 1 = Reset gyro signal path (sensor registers not cleared)
+	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_RESERVED_3 = (1 << 3); // Reserved
+	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_RESERVED_4 = (1 << 4); // Reserved
+	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_RESERVED_5 = (1 << 5); // Reserved
+	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_RESERVED_6 = (1 << 6); // Reserved
+	static constexpr uint8_t SIGNAL_PATH_RESET_BIT_RESERVED_7 = (1 << 7); // Reserved
+
 	// User control bits
 	static constexpr uint8_t USER_CTRL_BIT_SIG_COND_RST = (1 << 0); // SIG_COND_RST: 1 = Reset all sensor signal paths and clear sensor registers
 	static constexpr uint8_t USER_CTRL_BIT_I2C_MST_RST = (1 << 1);	// I2C_MST_RST: 1 = Reset I2C master (only when hung), auto-cleared
@@ -464,26 +525,35 @@ private:
 	static constexpr uint8_t PWR_MGMT_2_DISABLE_GYRO = PWR_MGMT_2_BIT_DISABLE_XG | PWR_MGMT_2_BIT_DISABLE_YG | PWR_MGMT_2_BIT_DISABLE_ZG;  // All gyro axes disabled
 	static constexpr uint8_t PWR_MGMT_2_DISABLE_ACCEL = PWR_MGMT_2_BIT_DISABLE_XA | PWR_MGMT_2_BIT_DISABLE_YA | PWR_MGMT_2_BIT_DISABLE_ZA; // All accelerometer axes disabled
 
-	// X accel offset L bits
+	// FIFO count high byte bits
+	static constexpr uint8_t FIFO_COUNT_H_BITS_FIFO_CNT = 0b11111;	 // FIFO_CNT (high byte of the count)
+	static constexpr uint8_t FIFO_COUNT_H_BIT_RESERVED_5 = (1 << 5); // Reserved
+	static constexpr uint8_t FIFO_COUNT_H_BIT_RESERVED_6 = (1 << 6); // Reserved
+	static constexpr uint8_t FIFO_COUNT_H_BIT_RESERVED_7 = (1 << 7); // Reserved
+
+	// X accel offset low byte bits
 	static constexpr uint8_t XA_OFFSET_L_BIT_RESERVED_0 = (1 << 0); // Reserved
-	static constexpr uint8_t XA_OFFSET_L_BITS_XA_OFFS = 0b11111110; // XA_OFFS [6:0]
+	static constexpr uint8_t XA_OFFSET_L_BITS_XA_OFFS = 0b11111110; // XA_OFFS
 
-	// Y accel offset L bits
+	// Y accel offset low byte bits
 	static constexpr uint8_t YA_OFFSET_L_BIT_RESERVED_0 = (1 << 0); // Reserved
-	static constexpr uint8_t YA_OFFSET_L_BITS_YA_OFFS = 0b11111110; // YA_OFFS [6:0]
+	static constexpr uint8_t YA_OFFSET_L_BITS_YA_OFFS = 0b11111110; // YA_OFFS
 
-	// Z accel offset L bits
+	// Z accel offset low byte bits
 	static constexpr uint8_t ZA_OFFSET_L_BIT_RESERVED_0 = (1 << 0); // Reserved
-	static constexpr uint8_t ZA_OFFSET_L_BITS_ZA_OFFS = 0b11111110; // ZA_OFFS [6:0]
+	static constexpr uint8_t ZA_OFFSET_L_BITS_ZA_OFFS = 0b11111110; // ZA_OFFS
 
 	// Accel offset field positions (used to combine / split the H and L registers)
-	static constexpr uint8_t XA_OFFSET_L_XA_OFFS_SHIFT = 1; // XA_OFFS [6:0] starts at bit 1
-	static constexpr uint8_t YA_OFFSET_L_YA_OFFS_SHIFT = 1; // YA_OFFS [6:0] starts at bit 1
-	static constexpr uint8_t ZA_OFFSET_L_ZA_OFFS_SHIFT = 1; // ZA_OFFS [6:0] starts at bit 1
+	static constexpr uint8_t XA_OFFSET_L_XA_OFFS_SHIFT = 1; // XA_OFFS starts at bit 1
+	static constexpr uint8_t YA_OFFSET_L_YA_OFFS_SHIFT = 1; // YA_OFFS starts at bit 1
+	static constexpr uint8_t ZA_OFFSET_L_ZA_OFFS_SHIFT = 1; // ZA_OFFS starts at bit 1
 
 	static constexpr uint8_t START_UP_TIME_MILLIS = 35; // Longest sensor start-up time from sleep mode (gyroscope)
+	static constexpr uint8_t RESET_TIME_MILLIS = 100;	// Time for a device reset to complete
 
 	static constexpr uint8_t EXT_SENS_DATA_COUNT = 24; // Number of EXT_SENS_DATA registers (00 to 23)
+
+	static constexpr uint16_t SLAVE4_TRANSFER_TIMEOUT_MILLIS = 300; // Slave 4 transfers happen at the sample rate (slowest 1 kHz / 256 = 3.9 Hz)
 
 	// Registers and bits for slaves 0 to 3 (no default values, so instances can be constexpr within the class)
 	struct SlaveRegisters final
@@ -591,6 +661,14 @@ private:
 		else
 			static_assert(ALWAYS_FALSE<SLAVE>, "Slave registers not implemented");
 	}
+
+	/// @brief Start a slave 4 transfer and wait for it to complete
+	/// @param addr I2C_SLV4_ADDR value (address and RNW)
+	/// @param reg Register to transfer to / from
+	/// @param data Byte to write (ignored for a read)
+	/// @param registerDisabled True = transfer data only, without writing the register address
+	/// @return True if the transfer completed without a NACK
+	bool transferSlave4(const uint8_t addr, const uint8_t reg, const uint8_t data, const bool registerDisabled);
 
 protected:
 	/// @brief Initialise MPU6500_I2C
@@ -1115,4 +1193,92 @@ public:
 	/// @param length Number of bytes to read
 	/// @return True if successful
 	bool readExternalSensorData(uint8_t *const data, const uint8_t index, const uint8_t length) const;
+
+	/// @brief Write a single byte to an aux I2C device using slave 4
+	/// @param address I2C address of the aux device
+	/// @param reg Register to write to
+	/// @param data Byte to write
+	/// @param registerDisabled True = transfer data only, without writing the register address
+	/// @return True if successful
+	bool writeSlave4(const uint8_t address, const uint8_t reg, const uint8_t data, const bool registerDisabled = false);
+
+	/// @brief Read a single byte from an aux I2C device using slave 4
+	/// @param address I2C address of the aux device
+	/// @param reg Register to read from
+	/// @param data Byte read
+	/// @param registerDisabled True = transfer data only, without writing the register address
+	/// @return True if successful
+	bool readSlave4(const uint8_t address, const uint8_t reg, uint8_t &data, const bool registerDisabled = false);
+
+	/// @brief Enable the slave 4 transfer complete interrupt
+	/// @brief Note: The register map says this also needs I2C_MST_INT_EN in INT_ENABLE, which the MPU-6500 does not have
+	/// @return True if successful
+	bool enableSlave4DoneInterrupt(const bool enable);
+
+	/// @brief Read the I2C master status. Reading clears it
+	/// @param status Populated with the I2C master status
+	/// @return True if successful
+	bool getI2CMasterStatus(I2CMasterStatus &status) const;
+
+	/// @brief Enable or disable FIFO operation
+	/// @return True if successful
+	bool enableFifo(const bool enable);
+
+	/// @brief Reset the FIFO, discarding its contents
+	/// @return True if successful
+	bool resetFifo();
+
+	/// @brief Set what happens when the FIFO is full
+	/// @return True if successful
+	template <FifoMode MODE>
+	bool setFifoMode()
+	{
+		uint8_t value = 0;
+		if (!readReg(REG_CONFIG, &value, 1))
+			return false;
+
+		if constexpr (MODE == FifoMode::Overwrite)
+			value &= ~CONFIG_BIT_FIFO_MODE; // FIFO_MODE - set to 0 (overwrite oldest data)
+		else if constexpr (MODE == FifoMode::StopWhenFull)
+			value |= CONFIG_BIT_FIFO_MODE; // FIFO_MODE - set to 1 (stop writing when full)
+		else
+			return false;
+
+		return writeReg(REG_CONFIG, &value);
+	}
+
+	/// @brief Set which data is written to the FIFO at the sample rate
+	/// @return True if successful
+	bool setFifoSources(const FifoSources &sources);
+
+	/// @brief Read the number of bytes in the FIFO
+	/// @return True if successful
+	bool readFifoCount(uint16_t &count) const;
+
+	/// @brief Read bytes from the FIFO
+	/// @param data Buffer for the data
+	/// @param length Number of bytes to read (1 to FIFO_SIZE)
+	/// @return True if successful
+	bool readFifo(uint8_t *const data, const uint16_t length) const;
+
+	/// @brief Reset all registers to their default values. The device is left awake
+	/// @return True if successful
+	bool reset();
+
+	/// @brief Reset the digital signal paths. The sensor data registers are not cleared (see resetSensors)
+	/// @return True if successful
+	bool resetSignalPaths(const bool gyro, const bool accel, const bool temperature);
+
+	/// @brief Reset all digital signal paths and clear the sensor data registers
+	/// @return True if successful
+	bool resetSensors();
+
+	/// @brief Reset the I2C master
+	/// @brief Note: Only use when the I2C master has hung. Resetting during an active transfer will hang the aux device
+	/// @return True if successful
+	bool resetI2CMaster();
+
+	/// @brief Reset the DMP. Fails if the DMP is enabled, as the reset only takes effect while it is disabled
+	/// @return True if successful
+	bool resetDmp();
 };
