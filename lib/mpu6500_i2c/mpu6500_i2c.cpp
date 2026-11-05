@@ -601,6 +601,98 @@ bool MPU6500_I2C::readData(SensorData &result) const
 	return parseData(data, DATA_LENGTH, result);
 }
 
+bool MPU6500_I2C::readSelfTestAverageRawData(RawSensorData &average) const
+{
+	int32_t accelX = 0;
+	int32_t accelY = 0;
+	int32_t accelZ = 0;
+	int32_t temperature = 0;
+	int32_t gyroX = 0;
+	int32_t gyroY = 0;
+	int32_t gyroZ = 0;
+
+	for (uint8_t sample = 0; sample < SELF_TEST_SAMPLE_COUNT; ++sample)
+	{
+		RawSensorData raw;
+		if (!readRawData(raw))
+			return false;
+
+		accelX += raw.accelX;
+		accelY += raw.accelY;
+		accelZ += raw.accelZ;
+		temperature += raw.temperature;
+		gyroX += raw.gyroX;
+		gyroY += raw.gyroY;
+		gyroZ += raw.gyroZ;
+
+		delay(SELF_TEST_SAMPLE_PERIOD_MILLIS);
+	}
+
+	average.accelX = static_cast<int16_t>(accelX / SELF_TEST_SAMPLE_COUNT);
+	average.accelY = static_cast<int16_t>(accelY / SELF_TEST_SAMPLE_COUNT);
+	average.accelZ = static_cast<int16_t>(accelZ / SELF_TEST_SAMPLE_COUNT);
+	average.temperature = static_cast<int16_t>(temperature / SELF_TEST_SAMPLE_COUNT);
+	average.gyroX = static_cast<int16_t>(gyroX / SELF_TEST_SAMPLE_COUNT);
+	average.gyroY = static_cast<int16_t>(gyroY / SELF_TEST_SAMPLE_COUNT);
+	average.gyroZ = static_cast<int16_t>(gyroZ / SELF_TEST_SAMPLE_COUNT);
+
+	return true;
+}
+
+bool MPU6500_I2C::validGyroSelfTestResponse(const int32_t response)
+{
+	const int32_t magnitude = (response < 0) ? -response : response;
+	return magnitude >= SELF_TEST_GYRO_MIN_RESPONSE;
+}
+
+bool MPU6500_I2C::validAccelSelfTestResponse(const int32_t response)
+{
+	const int32_t magnitude = (response < 0) ? -response : response;
+	return (magnitude >= SELF_TEST_ACCEL_MIN_RESPONSE) && (magnitude <= SELF_TEST_ACCEL_MAX_RESPONSE);
+}
+
+bool MPU6500_I2C::readSelfTestAverages(RawSensorData &normal, RawSensorData &testing)
+{
+	if (!writeReg(REG_SMPLRT_DIV, SELF_TEST_CONFIG, sizeof(SELF_TEST_CONFIG))) // SMPLRT_DIV to ACCEL_CONFIG_2 are contiguous
+		return false;
+
+	delay(SELF_TEST_SETTLE_TIME_MILLIS);
+	if (!readSelfTestAverageRawData(normal))
+		return false;
+
+	if (!writeReg(REG_GYRO_CONFIG, SELF_TEST_ENABLE, sizeof(SELF_TEST_ENABLE))) // GYRO_CONFIG and ACCEL_CONFIG are contiguous
+		return false;
+
+	delay(SELF_TEST_SETTLE_TIME_MILLIS);
+	return readSelfTestAverageRawData(testing);
+}
+
+bool MPU6500_I2C::normalSelfTest()
+{
+	// Save the configuration the test changes
+	uint8_t saved[sizeof(SELF_TEST_CONFIG)];
+	if (!readReg(REG_SMPLRT_DIV, saved, sizeof(saved))) // SMPLRT_DIV to ACCEL_CONFIG_2 are contiguous
+		return false;
+
+	RawSensorData normal;
+	RawSensorData testing;
+	const bool measured = readSelfTestAverages(normal, testing);
+
+	// Restore the configuration even if the measurement failed
+	const bool restored = writeReg(REG_SMPLRT_DIV, saved, sizeof(saved));
+	delay(SELF_TEST_SETTLE_TIME_MILLIS);
+
+	if (!measured || !restored)
+		return false;
+
+	return validGyroSelfTestResponse(testing.gyroX - normal.gyroX) &&
+		   validGyroSelfTestResponse(testing.gyroY - normal.gyroY) &&
+		   validGyroSelfTestResponse(testing.gyroZ - normal.gyroZ) &&
+		   validAccelSelfTestResponse(testing.accelX - normal.accelX) &&
+		   validAccelSelfTestResponse(testing.accelY - normal.accelY) &&
+		   validAccelSelfTestResponse(testing.accelZ - normal.accelZ);
+}
+
 bool MPU6500_I2C::disableWakeOnMotion()
 {
 	// Wake-on-motion interrupt

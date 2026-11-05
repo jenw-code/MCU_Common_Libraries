@@ -184,6 +184,12 @@ public:
 private:
 	static constexpr uint8_t IC_ID_VALUE = 0x70; // Value returned from the MPU-6500 when reading WHO_AM_I
 
+	static constexpr uint8_t REG_SELF_TEST_X_GYRO = 0x00;	// X gyro factory self-test code
+	static constexpr uint8_t REG_SELF_TEST_Y_GYRO = 0x01;	// Y gyro factory self-test code
+	static constexpr uint8_t REG_SELF_TEST_Z_GYRO = 0x02;	// Z gyro factory self-test code
+	static constexpr uint8_t REG_SELF_TEST_X_ACCEL = 0x0D;	// X accel factory self-test code
+	static constexpr uint8_t REG_SELF_TEST_Y_ACCEL = 0x0E;	// Y accel factory self-test code
+	static constexpr uint8_t REG_SELF_TEST_Z_ACCEL = 0x0F;	// Z accel factory self-test code
 	static constexpr uint8_t REG_XG_OFFSET_H = 0x13;		// X gyro offset (X_OFFS_USR), high byte
 	static constexpr uint8_t REG_XG_OFFSET_L = 0x14;		// X gyro offset (X_OFFS_USR), low byte
 	static constexpr uint8_t REG_YG_OFFSET_H = 0x15;		// Y gyro offset (Y_OFFS_USR), high byte
@@ -623,6 +629,34 @@ private:
 
 	static constexpr uint16_t SLAVE4_TRANSFER_TIMEOUT_MILLIS = 300; // Slave 4 transfers happen at the sample rate (slowest 1 kHz / 256 = 3.9 Hz)
 
+	// Self-test configuration, SMPLRT_DIV to ACCEL_CONFIG_2 (from InvenSense app note AN-MPU-6500A-02)
+	static constexpr uint8_t SELF_TEST_CONFIG[] = {
+		0,							   // SMPLRT_DIV: 1 kHz sample rate
+		CONFIG_DLPF_CFG_92HZ,		   // CONFIG: Gyro 92 Hz filter
+		GYRO_CONFIG_GYRO_FS_SEL_250,   // GYRO_CONFIG: ±250 dps, self-test off
+		ACCEL_CONFIG_ACCEL_FS_SEL_2G,  // ACCEL_CONFIG: ±2 g, self-test off
+		ACCEL_CONFIG_2_A_DLPF_CFG_92HZ // ACCEL_CONFIG_2: Accel 92 Hz filter
+	};
+
+	// Self-test enabled, GYRO_CONFIG and ACCEL_CONFIG
+	static constexpr uint8_t SELF_TEST_ENABLE[] = {
+		GYRO_CONFIG_BIT_XG_ST | GYRO_CONFIG_BIT_YG_ST | GYRO_CONFIG_BIT_ZG_ST | GYRO_CONFIG_GYRO_FS_SEL_250,	// GYRO_CONFIG: ±250 dps, self-test on
+		ACCEL_CONFIG_BIT_XA_ST | ACCEL_CONFIG_BIT_YA_ST | ACCEL_CONFIG_BIT_ZA_ST | ACCEL_CONFIG_ACCEL_FS_SEL_2G // ACCEL_CONFIG: ±2 g, self-test on
+	};
+
+	static constexpr uint8_t SELF_TEST_SAMPLE_COUNT = 200;		 // Samples averaged with and without self-test enabled
+	static constexpr uint8_t SELF_TEST_SAMPLE_PERIOD_MILLIS = 1; // Test sample rate is 1 kHz
+	static constexpr uint8_t SELF_TEST_SETTLE_TIME_MILLIS = 20;	 // Time for the output to settle after a configuration change
+
+	// Self-test response limits (app note limits for a working sensor), in LSB at ±250 dps and ±2 g
+	static constexpr uint8_t GYRO_LSB_PER_DPS_250DPS = 131;																				   // Gyro sensitivity at ±250 dps
+	static constexpr uint8_t SELF_TEST_GYRO_MIN_DPS = 60;																				   // Minimum gyro response
+	static constexpr uint16_t SELF_TEST_ACCEL_MIN_MG = 225;																				   // Minimum accel response
+	static constexpr uint16_t SELF_TEST_ACCEL_MAX_MG = 675;																				   // Maximum accel response
+	static constexpr uint16_t SELF_TEST_GYRO_MIN_RESPONSE = SELF_TEST_GYRO_MIN_DPS * GYRO_LSB_PER_DPS_250DPS;							   // 7860 LSB
+	static constexpr uint16_t SELF_TEST_ACCEL_MIN_RESPONSE = (static_cast<uint32_t>(SELF_TEST_ACCEL_MIN_MG) << ACCEL_SHIFT_2G) / MG_PER_G; // 3686 LSB
+	static constexpr uint16_t SELF_TEST_ACCEL_MAX_RESPONSE = (static_cast<uint32_t>(SELF_TEST_ACCEL_MAX_MG) << ACCEL_SHIFT_2G) / MG_PER_G; // 11059 LSB
+
 	// Registers and bits for slaves 0 to 3 (no default values, so instances can be constexpr within the class)
 	struct SlaveRegisters final
 	{
@@ -754,6 +788,20 @@ private:
 	/// @param result Accel (mg), temperature (m°C) and gyro (mdps)
 	/// @return True if successful
 	bool parseData(const uint8_t *const data, const uint8_t length, SensorData &result) const;
+
+	/// @brief Read the average of SELF_TEST_SAMPLE_COUNT samples
+	/// @return True if successful
+	bool readSelfTestAverageRawData(RawSensorData &average) const;
+
+	/// @brief True if the gyro self-test response is at least the minimum
+	static bool validGyroSelfTestResponse(const int32_t response);
+
+	/// @brief True if the accel self-test response is within the limits
+	static bool validAccelSelfTestResponse(const int32_t response);
+
+	/// @brief Apply the self-test configuration and read the averages without and then with self-test enabled
+	/// @return True if successful
+	bool readSelfTestAverages(RawSensorData &normal, RawSensorData &testing);
 
 protected:
 	/// @brief Initialise MPU6500_I2C
@@ -1413,6 +1461,11 @@ public:
 	/// @param result Accel (mg), temperature (m°C) and gyro (mdps)
 	/// @return True if successful
 	bool readData(SensorData &result) const;
+
+	/// @brief Check the gyro and accel are working (not their accuracy). Takes about half a second and the device must be still
+	/// @brief The gyro and accel must be running (SixAxis). The configuration is restored afterwards
+	/// @return True if every axis responds within the limits
+	bool normalSelfTest();
 
 	/// @brief Enable wake-on-motion: the INT pin signals when any accel axis exceeds the threshold
 	/// @brief See enableLowPower for waiting on motion at low power
