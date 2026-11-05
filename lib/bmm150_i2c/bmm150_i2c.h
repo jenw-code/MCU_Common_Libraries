@@ -217,12 +217,12 @@ private:
 
 	// Compensation constants (Bosch Sensortec fixed point compensation)
 	// Note: Other literal values in the compensation are undocumented fixed point scaling steps
-	static constexpr uint16_t COMPENSATION_RESISTANCE_SCALE = 16384;			 // Resistance ratio scale (2^14)
-	static constexpr int32_t COMPENSATION_XY_OFFSET = 0x100000;					 // X/Y offset (256 at 4096 scale)
-	static constexpr int16_t COMPENSATION_XY2_GAIN_OFFSET = 160;				 // dig_x2 / dig_y2 gain offset
-	static constexpr int16_t COMPENSATION_XY1_SCALE = 8;						 // dig_x1 / dig_y1 scale
-	static constexpr int32_t COMPENSATION_Z_SCALE = 65536;						 // Z dig_z1 term scale (2^16)
-	static constexpr int32_t COMPENSATION_Z_ROUNDING = COMPENSATION_Z_SCALE / 2; // Z dig_z1 term rounding to nearest
+	static constexpr uint16_t COMPENSATION_RESISTANCE_SCALE = 16384;			  // Resistance ratio scale (2^14)
+	static constexpr uint32_t COMPENSATION_XY_OFFSET = 256 * 4096;				  // X/Y offset (256 at 4096 scale)
+	static constexpr uint8_t COMPENSATION_XY2_GAIN_OFFSET = 160;				  // dig_x2 / dig_y2 gain offset
+	static constexpr uint8_t COMPENSATION_XY1_SCALE = 8;						  // dig_x1 / dig_y1 scale
+	static constexpr uint32_t COMPENSATION_Z_SCALE = 65536;						  // Z dig_z1 term scale (2^16)
+	static constexpr uint16_t COMPENSATION_Z_ROUNDING = COMPENSATION_Z_SCALE / 2; // Z dig_z1 term rounding to nearest
 
 	struct TrimData final
 	{
@@ -257,6 +257,10 @@ private:
 	/// @return True if successful
 	bool populateTrimData();
 
+	/// @brief Run the normal self-test (the device must be in sleep mode)
+	/// @return True if the test completed and all axes passed
+	bool runNormalSelfTest();
+
 	/// @brief Parse raw (uncompensated) data from the data register bytes (DATA_REGISTER onwards, DATA_LENGTH bytes)
 	void parseRawData(const uint8_t *const data, int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const;
 
@@ -275,19 +279,28 @@ private:
 	/// @brief Return true if the interrupt axes include the x-axis
 	static constexpr bool interruptAxesIncludeX(const InterruptAxes axes)
 	{
-		return (axes == InterruptAxes::X) || (axes == InterruptAxes::XY) || (axes == InterruptAxes::XZ) || (axes == InterruptAxes::XYZ);
+		return (axes == InterruptAxes::X) ||
+			   (axes == InterruptAxes::XY) ||
+			   (axes == InterruptAxes::XZ) ||
+			   (axes == InterruptAxes::XYZ);
 	}
 
 	/// @brief Return true if the interrupt axes include the y-axis
 	static constexpr bool interruptAxesIncludeY(const InterruptAxes axes)
 	{
-		return (axes == InterruptAxes::Y) || (axes == InterruptAxes::XY) || (axes == InterruptAxes::YZ) || (axes == InterruptAxes::XYZ);
+		return (axes == InterruptAxes::Y) ||
+			   (axes == InterruptAxes::XY) ||
+			   (axes == InterruptAxes::YZ) ||
+			   (axes == InterruptAxes::XYZ);
 	}
 
 	/// @brief Return true if the interrupt axes include the z-axis
 	static constexpr bool interruptAxesIncludeZ(const InterruptAxes axes)
 	{
-		return (axes == InterruptAxes::Z) || (axes == InterruptAxes::XZ) || (axes == InterruptAxes::YZ) || (axes == InterruptAxes::XYZ);
+		return (axes == InterruptAxes::Z) ||
+			   (axes == InterruptAxes::XZ) ||
+			   (axes == InterruptAxes::YZ) ||
+			   (axes == InterruptAxes::XYZ);
 	}
 
 protected:
@@ -309,14 +322,14 @@ public:
 	{
 		static_assert(MODE != PowerMode::Off, "Power off mode can only be entered by removing VDD / VDDIO");
 
-		uint8_t value = 0;
-		if (!readReg(REG_POWER_CONTROL, &value, 1))
-			return false;
-
 		if constexpr (MODE == PowerMode::Suspend)
 		{
-			value &= ~POWER_CONTROL_BIT_POWER_CONTROL; // Power Control Bit - set to 0 (suspend mode)
-			if (!writeReg(REG_POWER_CONTROL, &value))
+			uint8_t powerControl = 0;
+			if (!readReg(REG_POWER_CONTROL, &powerControl, 1))
+				return false;
+
+			powerControl &= ~POWER_CONTROL_BIT_POWER_CONTROL; // Power Control Bit - set to 0 (suspend mode)
+			if (!writeReg(REG_POWER_CONTROL, &powerControl))
 				return false;
 
 			_suspended = true;
@@ -327,27 +340,32 @@ public:
 			// Opmode register is only accessible once out of suspend mode
 			if (_suspended)
 			{
-				value |= POWER_CONTROL_BIT_POWER_CONTROL; // Power Control Bit - set to 1 (suspend -> sleep mode)
-				if (!writeReg(REG_POWER_CONTROL, &value))
+				uint8_t powerControl = 0;
+				if (!readReg(REG_POWER_CONTROL, &powerControl, 1))
+					return false;
+
+				powerControl |= POWER_CONTROL_BIT_POWER_CONTROL; // Power Control Bit - set to 1 (suspend -> sleep mode)
+				if (!writeReg(REG_POWER_CONTROL, &powerControl))
 					return false;
 
 				delay(START_UP_TIME_MILLIS);
 				_suspended = false;
 			}
 
-			if (!readReg(REG_OP_MODE, &value, 1))
+			uint8_t opMode = 0;
+			if (!readReg(REG_OP_MODE, &opMode, 1))
 				return false;
 
-			value &= ~OP_MODE_OPMODE_BITS_MASK; // Opmode - clear bits
+			opMode &= ~OP_MODE_OPMODE_BITS_MASK; // Opmode - clear bits
 
 			if constexpr (MODE == PowerMode::Sleep)
-				value |= OP_MODE_OPMODE_SLEEP;
+				opMode |= OP_MODE_OPMODE_SLEEP;
 			else if constexpr (MODE == PowerMode::Active)
-				value |= OP_MODE_OPMODE_NORMAL;
+				opMode |= OP_MODE_OPMODE_NORMAL;
 			else
 				return false;
 
-			return writeReg(REG_OP_MODE, &value);
+			return writeReg(REG_OP_MODE, &opMode);
 		}
 	}
 
@@ -361,8 +379,8 @@ public:
 	bool softReset();
 
 	/// @brief Run the normal self-test (checks x, y and z signal paths and connectivity)
-	/// @brief Note: The device is left in sleep mode
-	/// @return True if communication succeeded and all axes passed
+	/// @brief Note: The test runs in sleep mode. The power mode is restored afterwards
+	/// @return True if all axes passed and the power mode was restored
 	bool normalSelfTest();
 
 	/// @brief Enable / disable measurement channels. A disabled channel keeps its last measured value in the data registers
@@ -447,7 +465,7 @@ public:
 	}
 
 	/// @brief Set Low-Threshold interrupt (mapped to INT pin)
-	/// @brief Triggered when an enabled axis' raw data is below THRESHOLD x 16 (roughly 6 µT per LSB, not temperature compensated)
+	/// @brief Triggered when an enabled axis' raw data is below threshold x 16 (roughly 6 µT per LSB, not temperature compensated)
 	/// @tparam AXES The axes to enable for detection. None disables the interrupt
 	/// @param threshold Low Threshold register value
 	/// @return True if successful
@@ -469,7 +487,9 @@ public:
 			return false;
 
 		// Low Int X/Y/Z En - set to 1 (disabled), then set selected axes to 0 (enabled)
-		value |= (INTERRUPT_SETTINGS_BIT_LOW_INT_X_EN | INTERRUPT_SETTINGS_BIT_LOW_INT_Y_EN | INTERRUPT_SETTINGS_BIT_LOW_INT_Z_EN);
+		value |= (INTERRUPT_SETTINGS_BIT_LOW_INT_X_EN |
+				  INTERRUPT_SETTINGS_BIT_LOW_INT_Y_EN |
+				  INTERRUPT_SETTINGS_BIT_LOW_INT_Z_EN);
 
 		if constexpr (interruptAxesIncludeX(AXES))
 			value &= ~INTERRUPT_SETTINGS_BIT_LOW_INT_X_EN;
@@ -482,7 +502,7 @@ public:
 	}
 
 	/// @brief Set High-Threshold interrupt (mapped to INT pin)
-	/// @brief Triggered when an enabled axis' raw data is above THRESHOLD x 16 (roughly 6 µT per LSB, not temperature compensated)
+	/// @brief Triggered when an enabled axis' raw data is above threshold x 16 (roughly 6 µT per LSB, not temperature compensated)
 	/// @tparam AXES The axes to enable for detection. None disables the interrupt
 	/// @param threshold High Threshold register value
 	/// @return True if successful
@@ -540,7 +560,7 @@ public:
 	bool enableDataReadyInterrupt(const bool enable, const bool activeHigh = true);
 
 	/// @brief Read the interrupt status. Reading clears latched interrupts and the INT pin
-	/// @param status Populated with the interrupt status
+	/// @param status The interrupt status
 	/// @return True if successful
 	bool getInterruptStatus(InterruptStatus &status) const;
 
