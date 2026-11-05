@@ -5,9 +5,20 @@ BMM150_I2C::BMM150_I2C(TwoWire &i2cWire, const I2CAddress i2cAddr) : I2C_Master(
 bool BMM150_I2C::startWire()
 {
 	return I2C_Master::startWire() &&
+		   initialiseSuspended() &&
 		   setPowerMode<PowerMode::Sleep>() &&
 		   (getChipID() == IC_ID_VALUE) &&
 		   populateTrimData();
+}
+
+bool BMM150_I2C::initialiseSuspended()
+{
+	uint8_t value = 0;
+	if (!readReg(REG_POWER_CONTROL, &value, 1))
+		return false;
+
+	_suspended = ((value & POWER_CONTROL_BIT_POWER_CONTROL) == 0);
+	return true;
 }
 
 bool BMM150_I2C::populateTrimData()
@@ -38,11 +49,11 @@ bool BMM150_I2C::populateTrimData()
 
 bool BMM150_I2C::forceMeasurement()
 {
-	// Opmode register is only accessible once out of suspend mode
-	uint8_t value = 0;
-	if (!readReg(REG_POWER_CONTROL, &value, 1) || ((value & POWER_CONTROL_BIT_POWER_CONTROL) == 0))
+	// Registers other than power control are not accessible in suspend mode
+	if (_suspended)
 		return false;
 
+	uint8_t value = 0;
 	if (!readReg(REG_OP_MODE, &value, 1))
 		return false;
 
@@ -59,6 +70,10 @@ bool BMM150_I2C::forceMeasurement()
 
 bool BMM150_I2C::softReset()
 {
+	// Soft reset is ignored in suspend mode
+	if (_suspended)
+		return false;
+
 	uint8_t value = 0;
 	if (!readReg(REG_POWER_CONTROL, &value, 1))
 		return false;
@@ -98,7 +113,7 @@ bool BMM150_I2C::normalSelfTest()
 
 	} while ((value & OP_MODE_BIT_SELF_TEST) != 0);
 
-	// Self-test results are in bit 0 of the x, y and z LSB data registers
+	// Self-test results are in bit 0 of the x, y and z low byte data registers
 	constexpr uint8_t RESULT_SIZE = (REG_DATA_Z_LSB - REG_DATA_X_LSB) + 1;
 	uint8_t result[RESULT_SIZE];
 	if (!readReg(REG_DATA_X_LSB, result, RESULT_SIZE))
@@ -111,6 +126,10 @@ bool BMM150_I2C::normalSelfTest()
 
 bool BMM150_I2C::enableChannels(const bool channelX, const bool channelY, const bool channelZ)
 {
+	// Registers other than power control are not accessible in suspend mode
+	if (_suspended)
+		return false;
+
 	uint8_t value = 0;
 	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
 		return false;
@@ -135,6 +154,10 @@ bool BMM150_I2C::enableChannels(const bool channelX, const bool channelY, const 
 
 bool BMM150_I2C::setOverflowInterrupt(const bool enable)
 {
+	// Registers other than power control are not accessible in suspend mode
+	if (_suspended)
+		return false;
+
 	uint8_t value = 0;
 	if (!readReg(REG_INTERRUPT_SETTINGS, &value, 1))
 		return false;
@@ -149,6 +172,10 @@ bool BMM150_I2C::setOverflowInterrupt(const bool enable)
 
 bool BMM150_I2C::enableDataOverrun(const bool enable)
 {
+	// Registers other than power control are not accessible in suspend mode
+	if (_suspended)
+		return false;
+
 	uint8_t value = 0;
 	if (!readReg(REG_INTERRUPT_SETTINGS, &value, 1))
 		return false;
@@ -163,6 +190,10 @@ bool BMM150_I2C::enableDataOverrun(const bool enable)
 
 bool BMM150_I2C::enableInterrupts(const bool enable, const bool latched, const bool activeHigh)
 {
+	// Registers other than power control are not accessible in suspend mode
+	if (_suspended)
+		return false;
+
 	uint8_t value = 0;
 	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
 		return false;
@@ -187,6 +218,10 @@ bool BMM150_I2C::enableInterrupts(const bool enable, const bool latched, const b
 
 bool BMM150_I2C::enableDataReadyInterrupt(const bool enable, const bool activeHigh)
 {
+	// Registers other than power control are not accessible in suspend mode
+	if (_suspended)
+		return false;
+
 	uint8_t value = 0;
 	if (!readReg(REG_INTERRUPT_AXES, &value, 1))
 		return false;
@@ -206,6 +241,10 @@ bool BMM150_I2C::enableDataReadyInterrupt(const bool enable, const bool activeHi
 
 bool BMM150_I2C::getInterruptStatus(InterruptStatus &status) const
 {
+	// Registers other than power control are not accessible in suspend mode (they read as 0x00)
+	if (_suspended)
+		return false;
+
 	uint8_t value = 0;
 	if (!readReg(REG_INTERRUPT_STATUS, &value, 1))
 		return false;
@@ -224,7 +263,7 @@ bool BMM150_I2C::getInterruptStatus(InterruptStatus &status) const
 
 void BMM150_I2C::parseRawData(const uint8_t *const data, int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const
 {
-	// Combine MSB and LSB into the upper bits of a 16-bit value, then shift down to sign extend
+	// Combine the high and low bytes into the upper bits of a 16-bit value, then shift down to sign extend
 	const int16_t dataX = static_cast<int16_t>((data[REG_DATA_X_MSB - REG_DATA_X_LSB] << 8) |
 											   (data[REG_DATA_X_LSB - REG_DATA_X_LSB] & DATA_X_LSB_BITS_DATA_X));
 	x = dataX >> DATA_X_LSB_DATA_X_SHIFT;
@@ -244,6 +283,10 @@ void BMM150_I2C::parseRawData(const uint8_t *const data, int16_t &x, int16_t &y,
 
 bool BMM150_I2C::readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall) const
 {
+	// Registers other than power control are not accessible in suspend mode (they read as 0x00)
+	if (_suspended)
+		return false;
+
 	uint8_t data[DATA_LENGTH];
 	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
 		return false;
@@ -350,6 +393,10 @@ bool BMM150_I2C::parseData(const uint8_t *const data, const uint8_t length, int1
 
 bool BMM150_I2C::readData(int16_t &x, int16_t &y, int16_t &z) const
 {
+	// Registers other than power control are not accessible in suspend mode (they read as 0x00)
+	if (_suspended)
+		return false;
+
 	uint8_t data[DATA_LENGTH];
 	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
 		return false;

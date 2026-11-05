@@ -77,14 +77,14 @@ private:
 	static constexpr uint8_t IC_ID_VALUE = 0x32; // Value returned from the BMM150 when reading its chip ID
 
 	static constexpr uint8_t REG_CHIP_ID = 0x40;			// Chip ID register (reads 0x00 while in suspend mode)
-	static constexpr uint8_t REG_DATA_X_LSB = 0x42;			// DATA X [4:0] LSB and X-Self-Test
-	static constexpr uint8_t REG_DATA_X_MSB = 0x43;			// DATA X [12:5] MSB
-	static constexpr uint8_t REG_DATA_Y_LSB = 0x44;			// DATA Y [4:0] LSB and Y-Self-Test
-	static constexpr uint8_t REG_DATA_Y_MSB = 0x45;			// DATA Y [12:5] MSB
-	static constexpr uint8_t REG_DATA_Z_LSB = 0x46;			// DATA Z [6:0] LSB and Z-Self-Test
-	static constexpr uint8_t REG_DATA_Z_MSB = 0x47;			// DATA Z [14:7] MSB
-	static constexpr uint8_t REG_RHALL_LSB = 0x48;			// RHALL [5:0] LSB and Data Ready Status
-	static constexpr uint8_t REG_RHALL_MSB = 0x49;			// RHALL [13:6] MSB
+	static constexpr uint8_t REG_DATA_X_LSB = 0x42;			// DATA X low byte and X-Self-Test
+	static constexpr uint8_t REG_DATA_X_MSB = 0x43;			// DATA X high byte
+	static constexpr uint8_t REG_DATA_Y_LSB = 0x44;			// DATA Y low byte and Y-Self-Test
+	static constexpr uint8_t REG_DATA_Y_MSB = 0x45;			// DATA Y high byte
+	static constexpr uint8_t REG_DATA_Z_LSB = 0x46;			// DATA Z low byte and Z-Self-Test
+	static constexpr uint8_t REG_DATA_Z_MSB = 0x47;			// DATA Z high byte
+	static constexpr uint8_t REG_RHALL_LSB = 0x48;			// RHALL low byte and Data Ready Status
+	static constexpr uint8_t REG_RHALL_MSB = 0x49;			// RHALL high byte
 	static constexpr uint8_t REG_INTERRUPT_STATUS = 0x4A;	// Interrupt status register (cleared when read, for latched interrupts)
 	static constexpr uint8_t REG_POWER_CONTROL = 0x4B;		// Power control and soft reset register (only register accessible in suspend mode)
 	static constexpr uint8_t REG_OP_MODE = 0x4C;			// Operation mode, data rate and self test register
@@ -98,47 +98,47 @@ private:
 	// Trim registers (not documented in the datasheet, layout from the Bosch Sensortec BMM150 API)
 	static constexpr uint8_t REG_DIG_X1 = 0x5D;		  // dig_x1 (int8)
 	static constexpr uint8_t REG_DIG_Y1 = 0x5E;		  // dig_y1 (int8)
-	static constexpr uint8_t REG_DIG_Z4_LSB = 0x62;	  // dig_z4 LSB (int16)
-	static constexpr uint8_t REG_DIG_Z4_MSB = 0x63;	  // dig_z4 MSB
+	static constexpr uint8_t REG_DIG_Z4_LSB = 0x62;	  // dig_z4 low byte (int16)
+	static constexpr uint8_t REG_DIG_Z4_MSB = 0x63;	  // dig_z4 high byte
 	static constexpr uint8_t REG_DIG_X2 = 0x64;		  // dig_x2 (int8)
 	static constexpr uint8_t REG_DIG_Y2 = 0x65;		  // dig_y2 (int8)
-	static constexpr uint8_t REG_DIG_Z2_LSB = 0x68;	  // dig_z2 LSB (int16)
-	static constexpr uint8_t REG_DIG_Z2_MSB = 0x69;	  // dig_z2 MSB
-	static constexpr uint8_t REG_DIG_Z1_LSB = 0x6A;	  // dig_z1 LSB (uint16)
-	static constexpr uint8_t REG_DIG_Z1_MSB = 0x6B;	  // dig_z1 MSB
-	static constexpr uint8_t REG_DIG_XYZ1_LSB = 0x6C; // dig_xyz1 LSB (uint16)
-	static constexpr uint8_t REG_DIG_XYZ1_MSB = 0x6D; // dig_xyz1 MSB (bit 7 not part of value)
-	static constexpr uint8_t REG_DIG_Z3_LSB = 0x6E;	  // dig_z3 LSB (int16)
-	static constexpr uint8_t REG_DIG_Z3_MSB = 0x6F;	  // dig_z3 MSB
+	static constexpr uint8_t REG_DIG_Z2_LSB = 0x68;	  // dig_z2 low byte (int16)
+	static constexpr uint8_t REG_DIG_Z2_MSB = 0x69;	  // dig_z2 high byte
+	static constexpr uint8_t REG_DIG_Z1_LSB = 0x6A;	  // dig_z1 low byte (uint16)
+	static constexpr uint8_t REG_DIG_Z1_MSB = 0x6B;	  // dig_z1 high byte
+	static constexpr uint8_t REG_DIG_XYZ1_LSB = 0x6C; // dig_xyz1 low byte (uint16)
+	static constexpr uint8_t REG_DIG_XYZ1_MSB = 0x6D; // dig_xyz1 high byte (bit 7 not part of value)
+	static constexpr uint8_t REG_DIG_Z3_LSB = 0x6E;	  // dig_z3 low byte (int16)
+	static constexpr uint8_t REG_DIG_Z3_MSB = 0x6F;	  // dig_z3 high byte
 	static constexpr uint8_t REG_DIG_XY2 = 0x70;	  // dig_xy2 (int8)
 	static constexpr uint8_t REG_DIG_XY1 = 0x71;	  // dig_xy1 (uint8)
 
-	// Data X LSB bits
+	// Data X low byte bits
 	static constexpr uint8_t DATA_X_LSB_BIT_X_SELF_TEST = (1 << 0); // X-Self-Test: Normal self-test result for x-axis
 	static constexpr uint8_t DATA_X_LSB_BIT_FIXED_1 = (1 << 1);		// Fixed to 0
 	static constexpr uint8_t DATA_X_LSB_BIT_FIXED_2 = (1 << 2);		// Fixed to 0
-	static constexpr uint8_t DATA_X_LSB_BITS_DATA_X = 0b11111000;	// DATA X [4:0]
+	static constexpr uint8_t DATA_X_LSB_BITS_DATA_X = 0b11111000;	// DATA X
 
-	// Data Y LSB bits
+	// Data Y low byte bits
 	static constexpr uint8_t DATA_Y_LSB_BIT_Y_SELF_TEST = (1 << 0); // Y-Self-Test: Normal self-test result for y-axis
 	static constexpr uint8_t DATA_Y_LSB_BIT_FIXED_1 = (1 << 1);		// Fixed to 0
 	static constexpr uint8_t DATA_Y_LSB_BIT_FIXED_2 = (1 << 2);		// Fixed to 0
-	static constexpr uint8_t DATA_Y_LSB_BITS_DATA_Y = 0b11111000;	// DATA Y [4:0]
+	static constexpr uint8_t DATA_Y_LSB_BITS_DATA_Y = 0b11111000;	// DATA Y
 
-	// Data Z LSB bits
+	// Data Z low byte bits
 	static constexpr uint8_t DATA_Z_LSB_BIT_Z_SELF_TEST = (1 << 0); // Z-Self-Test: Normal self-test result for z-axis
-	static constexpr uint8_t DATA_Z_LSB_BITS_DATA_Z = 0b11111110;	// DATA Z [6:0]
+	static constexpr uint8_t DATA_Z_LSB_BITS_DATA_Z = 0b11111110;	// DATA Z
 
-	// RHALL LSB bits
+	// RHALL low byte bits
 	static constexpr uint8_t RHALL_LSB_BIT_DATA_READY_STATUS = (1 << 0); // Data Ready Status: 1 = Data registers updated and not yet read, 0 = Read (cleared on data register read)
 	static constexpr uint8_t RHALL_LSB_BIT_FIXED_1 = (1 << 1);			 // Fixed to 0
-	static constexpr uint8_t RHALL_LSB_BITS_RHALL = 0b11111100;			 // RHALL [5:0]
+	static constexpr uint8_t RHALL_LSB_BITS_RHALL = 0b11111100;			 // RHALL
 
-	// Data field positions within the LSB registers (used to combine the MSB and LSB registers)
-	static constexpr uint8_t DATA_X_LSB_DATA_X_SHIFT = 3; // DATA X [4:0] starts at bit 3
-	static constexpr uint8_t DATA_Y_LSB_DATA_Y_SHIFT = 3; // DATA Y [4:0] starts at bit 3
-	static constexpr uint8_t DATA_Z_LSB_DATA_Z_SHIFT = 1; // DATA Z [6:0] starts at bit 1
-	static constexpr uint8_t RHALL_LSB_RHALL_SHIFT = 2;	  // RHALL [5:0] starts at bit 2
+	// Data field positions within the low byte registers (used to combine the high and low bytes)
+	static constexpr uint8_t DATA_X_LSB_DATA_X_SHIFT = 3; // DATA X starts at bit 3
+	static constexpr uint8_t DATA_Y_LSB_DATA_Y_SHIFT = 3; // DATA Y starts at bit 3
+	static constexpr uint8_t DATA_Z_LSB_DATA_Z_SHIFT = 1; // DATA Z starts at bit 1
+	static constexpr uint8_t RHALL_LSB_RHALL_SHIFT = 2;	  // RHALL starts at bit 2
 
 	// Interrupt status bits
 	static constexpr uint8_t INTERRUPT_STATUS_BIT_LOW_INT_X = (1 << 0);	   // Low Int X: 1 = X-axis below Low-Threshold
@@ -208,8 +208,8 @@ private:
 	static constexpr uint8_t INTERRUPT_AXES_BIT_INTERRUPT_PIN_EN = (1 << 6);   // Interrupt Pin En: 1 = Interrupt status mapped to INT pin, 0 = Disabled (default)
 	static constexpr uint8_t INTERRUPT_AXES_BIT_DATA_READY_PIN_EN = (1 << 7);  // Data Ready Pin En: 1 = Data ready mapped to DRDY pin, 0 = Disabled (default)
 
-	// dig_xyz1 MSB bits
-	static constexpr uint8_t DIG_XYZ1_MSB_BITS_DIG_XYZ1 = 0b1111111; // dig_xyz1 [14:8]
+	// dig_xyz1 high byte bits
+	static constexpr uint8_t DIG_XYZ1_MSB_BITS_DIG_XYZ1 = 0b1111111; // dig_xyz1 (bit 7 is not used)
 
 	static constexpr uint8_t START_UP_TIME_MILLIS = 3;			   // Time from suspend to sleep mode after setting power control bit
 	static constexpr uint8_t SOFT_RESET_TIME_MILLIS = 1;		   // Time for soft reset to complete
@@ -241,11 +241,17 @@ private:
 
 	TrimData _trimData;
 
+	bool _suspended = true; // Set from the device by initialiseSuspended, kept up to date by setPowerMode
+
 	/// @brief Return 8 bit chip ID
 	uint8_t getChipID() const
 	{
 		return readReg(REG_CHIP_ID);
 	}
+
+	/// @brief Set _suspended from the device, which may already be out of suspend mode (e.g. after an MCU-only reset)
+	/// @return True if successful
+	bool initialiseSuspended();
 
 	/// @brief Read the factory trim data used for compensation into _trimData
 	/// @return True if successful
@@ -291,8 +297,8 @@ protected:
 
 public:
 	// Data registers, for a host that reads them on the BMM150's behalf (e.g. the MPU-6500's auxiliary I2C master)
-	static constexpr uint8_t DATA_REGISTER = REG_DATA_X_LSB;							   // First data register (DATA X LSB)
-	static constexpr uint8_t DATA_LENGTH = (REG_RHALL_MSB - REG_DATA_X_LSB) + 1; // Number of data registers (DATA X LSB to RHALL MSB)
+	static constexpr uint8_t DATA_REGISTER = REG_DATA_X_LSB;					 // First data register (DATA X low byte)
+	static constexpr uint8_t DATA_LENGTH = (REG_RHALL_MSB - REG_DATA_X_LSB) + 1; // Number of data registers (DATA X low byte to RHALL high byte)
 
 	explicit BMM150_I2C(TwoWire &i2cWire = Wire, const I2CAddress i2cAddr = I2CAddress::Addr_0x10);
 
@@ -310,18 +316,23 @@ public:
 		if constexpr (MODE == PowerMode::Suspend)
 		{
 			value &= ~POWER_CONTROL_BIT_POWER_CONTROL; // Power Control Bit - set to 0 (suspend mode)
-			return writeReg(REG_POWER_CONTROL, &value);
+			if (!writeReg(REG_POWER_CONTROL, &value))
+				return false;
+
+			_suspended = true;
+			return true;
 		}
 		else
 		{
 			// Opmode register is only accessible once out of suspend mode
-			if ((value & POWER_CONTROL_BIT_POWER_CONTROL) == 0)
+			if (_suspended)
 			{
 				value |= POWER_CONTROL_BIT_POWER_CONTROL; // Power Control Bit - set to 1 (suspend -> sleep mode)
 				if (!writeReg(REG_POWER_CONTROL, &value))
 					return false;
 
 				delay(START_UP_TIME_MILLIS);
+				_suspended = false;
 			}
 
 			if (!readReg(REG_OP_MODE, &value, 1))
@@ -345,7 +356,7 @@ public:
 	bool forceMeasurement();
 
 	/// @brief Soft reset. All registers except the trim and power control registers are reset to default, and the device is left in sleep mode
-	/// @brief Note: Ignored in suspend mode
+	/// @brief Note: Fails in suspend mode, where the device ignores a soft reset
 	/// @return True if successful
 	bool softReset();
 
@@ -364,6 +375,10 @@ public:
 	template <DataOutputRate RATE>
 	bool setDataRate()
 	{
+		// Registers other than power control are not accessible in suspend mode
+		if (_suspended)
+			return false;
+
 		uint8_t value = 0;
 		if (!readReg(REG_OP_MODE, &value, 1))
 			return false;
@@ -403,6 +418,10 @@ public:
 		static_assert((N_XY % 2) == 1, "N_XY must be odd (nXY = 1 + 2 x REPXY)");
 		static_assert((N_Z >= 1) && (N_Z <= 256), "N_Z must be in the range of 1 to 256");
 
+		// Registers other than power control are not accessible in suspend mode
+		if (_suspended)
+			return false;
+
 		uint8_t repXY = static_cast<uint8_t>((N_XY - 1) / 2);
 		uint8_t repZ = static_cast<uint8_t>(N_Z - 1);
 
@@ -435,6 +454,10 @@ public:
 	template <InterruptAxes AXES>
 	bool setLowThresholdInterrupt(const uint8_t threshold)
 	{
+		// Registers other than power control are not accessible in suspend mode
+		if (_suspended)
+			return false;
+
 		if constexpr (AXES != InterruptAxes::None)
 		{
 			if (!writeReg(REG_LOW_THRESHOLD, &threshold))
@@ -466,6 +489,10 @@ public:
 	template <InterruptAxes AXES>
 	bool setHighThresholdInterrupt(const uint8_t threshold)
 	{
+		// Registers other than power control are not accessible in suspend mode
+		if (_suspended)
+			return false;
+
 		if constexpr (AXES != InterruptAxes::None)
 		{
 			if (!writeReg(REG_HIGH_THRESHOLD, &threshold))
