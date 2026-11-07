@@ -5,19 +5,11 @@
 
 /// @brief Class for the Waveshare TOF Laser Range Sensor Mini (a Nooploop TOFSense-F2 Mini), over UART
 /// @brief Uses Nooploop's NLink TOFSense protocol
+/// @tparam BAUD_RATE The module's baud rate. The default is the rate the module is supplied with
+template <UART_Master::BaudRate BAUD_RATE = UART_Master::BaudRate::Baud921600>
 class TOF_Laser_Range_Mini_UART final : public UART_Master
 {
 public:
-	struct Measurement final
-	{
-		uint8_t id = 0;				 // id: Module ID
-		uint32_t systemTime = 0;	 // System_time: Time since the module powered up (ms)
-		uint32_t distance = 0;		 // dis: Distance (mm)
-		uint8_t distanceStatus = 0;	 // dis_status: 1 = Valid measurement distance, 0 = Invalid
-		uint16_t signalStrength = 0; // signal_strength: Strength of the return signal (higher is stronger)
-		uint8_t rangePrecision = 0;	 // range_precision: Ranging accuracy (cm, smaller is better). Not valid on the Mini
-	};
-
 	struct Settings final
 	{
 		uint8_t id = 0;			   // id: Node ID
@@ -30,7 +22,16 @@ public:
 		uint8_t filterFactor = 0;  // filter factor: 0 to 255 (default 5)
 	};
 
+	// How the module sends measurements over UART
+	enum class OutputMode : uint8_t
+	{
+		Continuous = 0, // Active output: the module sends measurements continuously, at its refresh rate
+		Request = 1		// Query output: the module only sends a measurement when requested
+	};
+
 private:
+	OutputMode _outputMode = OutputMode::Continuous; // The module is supplied in continuous (active) output mode
+
 	// NLink_TOFSense_Frame0: measurement output frame, sent by the module
 	static constexpr uint8_t FRAME0_FRAME_HEADER_INDEX = 0;		// Frame Header (uint8)
 	static constexpr uint8_t FRAME0_FUNCTION_MARK_INDEX = 1;	// Function Mark (uint8)
@@ -90,15 +91,37 @@ private:
 
 	static constexpr uint8_t FACTORY_ID = 0; // Every module is supplied with ID 0
 
+	/// @brief Calculate the time to transmit bytes over the UART at BAUD_RATE
+	/// @param byteCount Number of bytes
+	/// @return The time (µs)
+	static constexpr uint32_t calcTransmitMicros(const uint8_t byteCount)
+	{
+		constexpr uint32_t BITS_PER_UART_BYTE = 10; // Start bit, 8 data bits and stop bit
+		constexpr uint32_t MICROS_PER_SECOND = 1000000;
+
+		return (static_cast<uint32_t>(byteCount) * BITS_PER_UART_BYTE * MICROS_PER_SECOND) / static_cast<uint32_t>(BAUD_RATE);
+	}
+
 	/// @brief Calculate a frame's Sum Check, from every byte of the frame except the Sum Check itself
 	/// @param frame The frame
 	/// @param length The frame's length (bytes)
 	/// @param sumCheckIndex The index of the frame's Sum Check
 	/// @return The Sum Check
-	static uint8_t calcSumCheck(const uint8_t *const frame, const uint8_t length, const uint8_t sumCheckIndex);
+	static uint8_t calcSumCheck(const uint8_t *const frame, const uint8_t length, const uint8_t sumCheckIndex)
+	{
+		uint32_t sum = 0;
+		for (uint8_t index = 0; index < length; ++index)
+		{
+			if (index != sumCheckIndex)
+				sum += frame[index];
+		}
 
-	/// @brief Wait for a valid frame, using rolling validation. Every byte received is written to a buffer one frame
-	/// @brief long, so that if a frame is invalid, the search can carry on from the next header within the buffer
+		// The Sum Check is the lowest byte of the sum
+		return static_cast<uint8_t>(sum);
+	}
+
+	/// @brief Wait for the latest valid frame, using rolling validation. Every byte received is written to a buffer one
+	/// @brief frame long, so that if a frame is invalid, the search can carry on from the next header within the buffer
 	/// @tparam HEADER_BYTE_ONE The frame's first header byte (its Frame Header)
 	/// @tparam HEADER_BYTE_TWO The frame's second header byte (its Function Mark)
 	/// @tparam SUM_CHECK_INDEX The index of the frame's Sum Check
@@ -113,11 +136,24 @@ private:
 		static_assert(LENGTH <= INT8_MAX, "frameStartIndex is an int8_t, so it must be able to hold every index in the buffer");
 		static_assert(SUM_CHECK_INDEX < LENGTH, "The Sum Check must be inside the frame");
 
+		// Frames build up if they aren't read as often as they're sent. Fewer than two frames' worth of bytes can't
+		// hold two complete frames, so once the older bytes are discarded, the first valid frame found is the latest
+		constexpr size_t MAX_BYTES_KEPT = (2 * static_cast<size_t>(LENGTH)) - 1;
+
+		size_t bytesWaiting = bytesAvailable();
+		if (bytesWaiting > MAX_BYTES_KEPT)
+		{
+			const size_t bytesToDiscard = bytesWaiting - MAX_BYTES_KEPT;
+			for (size_t index = 0; index < bytesToDiscard; ++index)
+				readByte();
+
+			bytesWaiting = MAX_BYTES_KEPT;
+		}
+
 		uint8_t buffer[LENGTH] = {};
 		uint8_t bufferIndex = 0;	 // Where the latest byte is
 		int8_t frameStartIndex = -1; // Where the frame's first header byte is, or -1 if no header has been found
 		const uint32_t startMillis = millis();
-		size_t bytesWaiting = bytesAvailable();
 
 		// Every byte recorded is processed, but more are only waited for until the timeout
 		while ((bytesWaiting > 0) || ((millis() - startMillis) < timeoutMillis))
@@ -212,26 +248,130 @@ private:
 
 	/// @brief Send the module a request to read its settings
 	/// @return True if the request was sent
-	bool requestSettings();
+	bool requestSettings()
+	{
+		// HARDWARE CHECK NEEDED: the manual only shows a settings write, so this read request is unconfirmed.
+		// Check the module replies to it.
+
+		// Fields the request doesn't set, including the reserved ones, are sent as 0xFF, as in the manual's write example
+		constexpr uint8_t NOT_SET_VALUE = 0xFF;
+
+		// Create request buffer and set all values to the "not set" value.
+		// We'll then assign the values needed to request the settings.
+		uint8_t request[F_SETTING_FRAME0_LENGTH];
+		memset(request, NOT_SET_VALUE, F_SETTING_FRAME0_LENGTH);
+
+		request[F_SETTING_FRAME0_FRAME_HEADER_INDEX] = F_SETTING_FRAME0_FRAME_HEADER;
+		request[F_SETTING_FRAME0_FUNCTION_MARK_INDEX] = F_SETTING_FRAME0_FUNCTION_MARK;
+		request[F_SETTING_FRAME0_MIX_INDEX] = MIX_READ;
+		request[F_SETTING_FRAME0_ID_INDEX] = FACTORY_ID;
+		request[F_SETTING_FRAME0_SUM_CHECK_INDEX] = calcSumCheck(request, F_SETTING_FRAME0_LENGTH, F_SETTING_FRAME0_SUM_CHECK_INDEX);
+
+		return writeBytes(request, F_SETTING_FRAME0_LENGTH);
+	}
 
 	/// @brief Read the module's settings, from the NLink_TOFSense_F_Setting_Frame0 it sends in reply to a request
 	/// @param settings Receives the settings. Only changed if the read succeeds
 	/// @return True if the request was sent and a frame with a valid Sum Check arrived in time
-	bool readSettings(Settings &settings);
+	bool readSettings(Settings &settings)
+	{
+		// waitForFrame relies on the Frame Header coming first, followed by the Function Mark
+		static_assert(F_SETTING_FRAME0_FRAME_HEADER_INDEX == 0, "The Frame Header must be the frame's first byte");
+		static_assert(F_SETTING_FRAME0_FUNCTION_MARK_INDEX == (F_SETTING_FRAME0_FRAME_HEADER_INDEX + 1), "The Function Mark must follow the Frame Header");
+
+		if (!requestSettings())
+			return false;
+
+		// Allows for the request and reply at the slowest baud rate, plus any measurement frames sent in between
+		constexpr uint32_t RESPONSE_TIMEOUT_MILLIS = 250;
+
+		uint8_t frame[F_SETTING_FRAME0_LENGTH];
+		if (!waitForFrame<F_SETTING_FRAME0_FRAME_HEADER, F_SETTING_FRAME0_FUNCTION_MARK, F_SETTING_FRAME0_SUM_CHECK_INDEX>(frame, RESPONSE_TIMEOUT_MILLIS))
+			return false;
+
+		settings = parseSettings(frame);
+		return true;
+	}
+
+	/// @brief Send the module a request for one measurement, which it sends back as an NLink_TOFSense_Frame0
+	/// @return True if the request was sent
+	bool requestMeasurement()
+	{
+		// Create request buffer and set all values to the reserved value.
+		// We'll then assign the values needed to request a measurement.
+		uint8_t request[READ_FRAME0_LENGTH];
+		memset(request, RESERVED_VALUE, READ_FRAME0_LENGTH);
+
+		request[READ_FRAME0_FRAME_HEADER_INDEX] = FRAME_HEADER;
+		request[READ_FRAME0_FUNCTION_MARK_INDEX] = READ_FRAME0_FUNCTION_MARK;
+		request[READ_FRAME0_ID_INDEX] = FACTORY_ID;
+		request[READ_FRAME0_SUM_CHECK_INDEX] = calcSumCheck(request, READ_FRAME0_LENGTH, READ_FRAME0_SUM_CHECK_INDEX);
+
+		return writeBytes(request, READ_FRAME0_LENGTH);
+	}
 
 protected:
 	/// @brief Start the module and confirm it responds
 	/// @return True if successful
-	bool startSerial() override;
+	bool startSerial() override
+	{
+		Settings settings;
+
+		return UART_Master::startSerial() &&
+			   readSettings(settings); // Read settings - this confirms the device is running
+	}
 
 public:
 	/// @param serial The UART the module is connected to (hardware or PIO serial)
-	/// @param baudRate The module's baud rate. The default is the rate the module is supplied with
-	explicit TOF_Laser_Range_Mini_UART(HardwareSerial &serial, const BaudRate baudRate = BaudRate::Baud921600);
+	explicit TOF_Laser_Range_Mini_UART(HardwareSerial &serial) : UART_Master(serial, BAUD_RATE) {}
 
-	/// @brief Read the distance from the next valid NLink_TOFSense_Frame0, which the module sends in active output mode
+	/// @brief Set how the module sends measurements
+	/// @brief TODO: not yet implemented, so this always returns false and the mode stays Continuous
+	/// @param mode The output mode
+	/// @return True if the mode was set
+	bool setOutputMode(const OutputMode mode)
+	{
+		// TODO: write the output mode to the module (bit1 of the settings frame's mode byte, by read-modify-write) once
+		// the hardware has confirmed the mode byte's layout. Until then, the mode can't be changed
+		return false;
+	}
+
+	/// @brief Read the distance from the latest valid NLink_TOFSense_Frame0. In Request mode, a measurement is
+	/// @brief requested first
 	/// @param distance Receives the distance (mm). Only changed if a frame is found
 	/// @param timeoutMillis How long to wait for more bytes (ms). 0 uses only the bytes already received
 	/// @return True if a valid frame was found in time
-	bool readDistance(uint32_t &distance, const uint32_t timeoutMillis);
+	bool readDistance(uint32_t &distance, const uint32_t timeoutMillis = 10)
+	{
+		// waitForFrame relies on the Frame Header coming first, followed by the Function Mark
+		static_assert(FRAME0_FRAME_HEADER_INDEX == 0, "The Frame Header must be the frame's first byte");
+		static_assert(FRAME0_FUNCTION_MARK_INDEX == (FRAME0_FRAME_HEADER_INDEX + 1), "The Function Mark must follow the Frame Header");
+
+		if (_outputMode == OutputMode::Continuous)
+		{
+			// Nothing to do: the module sends measurements without being asked
+		}
+		else if (_outputMode == OutputMode::Request)
+		{
+			if (!requestMeasurement())
+				return false;
+
+			// An estimate, as the manual doesn't give the module's processing time. Check it on the hardware
+			constexpr uint32_t MODULE_PROCESSING_MICROS = 2000;
+
+			// The request and reply have to be transmitted, and the module has to process the request, so that the
+			// reply should be waiting before waitForFrame's timeout starts
+			const uint8_t bytesTransmitted = static_cast<uint8_t>(READ_FRAME0_LENGTH + FRAME0_LENGTH);
+			delayMicroseconds(calcTransmitMicros(bytesTransmitted) + MODULE_PROCESSING_MICROS);
+		}
+		else
+			return false;
+
+		uint8_t frame[FRAME0_LENGTH];
+		if (!waitForFrame<FRAME_HEADER, FRAME0_FUNCTION_MARK, FRAME0_SUM_CHECK_INDEX>(frame, timeoutMillis))
+			return false;
+
+		distance = parseField<uint32_t>(frame, FRAME0_DIS_INDEX, 3); // uint24 in the frame
+		return true;
+	}
 };
