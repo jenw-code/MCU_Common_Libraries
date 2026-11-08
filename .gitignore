@@ -1,6 +1,7 @@
 .exe
 .pio
-.vscode
-.vscode
+.vscode/launch*
+.vscode/extensions*
+.vscode/*_properties*
 *.log
 docs
