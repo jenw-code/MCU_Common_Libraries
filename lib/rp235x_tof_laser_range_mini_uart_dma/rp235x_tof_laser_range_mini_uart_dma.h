@@ -6,9 +6,11 @@
 #include "tof_laser_range_mini.h"
 #include "rp2xxx_uart.h"
 
-/// @brief Class for the Waveshare TOF Laser Range Sensor Mini (a Nooploop TOFSense-F2 Mini), over UART, received by DMA
-/// @brief Uses Nooploop's NLink TOFSense protocol. DMA copies every byte received into a buffer, so no core time
-/// @brief is spent per byte, and the latest frame can be read at any time, including from an interrupt
+/// @brief Class for the Waveshare TOF Laser Range Sensor Mini (a Nooploop TOFSense-F2 Mini), over UART
+/// @brief Uses Nooploop's NLink TOFSense protocol
+/// @brief Receiving: DMA copies every byte received into a ring buffer, so no core time is spent per byte
+/// @brief Sending: the core writes each request straight to the UART's TX FIFO. Requests are a few short frames,
+/// @brief which don't justify tying up a DMA channel
 /// @tparam BAUD_RATE The device's baud rate. The default is the rate the device is supplied with
 template <UART_Master::BaudRate BAUD_RATE = UART_Master::BaudRate::Baud921600>
 class RP235x_TOF_Laser_Range_Mini_UART_DMA final : public TOF_Laser_Range_Mini
