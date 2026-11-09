@@ -2,7 +2,6 @@
 
 #include <Arduino.h>
 #include <hardware/clocks.h>
-#include <hardware/dma.h>
 #include <hardware/gpio.h>
 #include <hardware/pio.h>
 #include <hardware/uart.h>
@@ -29,14 +28,6 @@ struct RP2xxx_UART_TX_t final
 	const volatile uint32_t *statusAddress = nullptr;
 	uint32_t fullMask = 0; // The bit in the status that's set while the TX FIFO is full
 	uint32_t baudRate = 0; // (bits per second)
-};
-
-/// @brief A UART (hardware or PIO): where each byte received is and the DREQ that signals it, and where each byte
-/// @brief to send is written and how to tell when it can be
-struct RP2xxx_UART_RX_TX_t final
-{
-	RP2xxx_UART_RX_t rx = {};
-	RP2xxx_UART_TX_t tx = {};
 };
 
 /// @brief Helper that receives and sends UART (8N1) using a hardware UART. It can't also be used through Serial1 or Serial2
@@ -105,19 +96,6 @@ public:
 		return true;
 	}
 
-	/// @brief Set up a hardware UART that receives and sends
-	/// @param rxConfig The UART to receive with, and the pin to receive on
-	/// @param txConfig The UART to send with, and the pin to send on
-	/// @param baudRate The baud rate
-	/// @param uart Receives the UART's info. Only changed if the UART is set up
-	/// @return True if set up,false if either UART doesn't exist
-	static bool setup_RX_TX(const RP2xxx_UART_Config_t &rxConfig, const RP2xxx_UART_Config_t &txConfig,
-							 const UART_Master::BaudRate baudRate, RP2xxx_UART_RX_TX_t &uart)
-	{
-		return setup_RX(rxConfig, baudRate, uart.rx) &&
-			   setup_TX(txConfig, baudRate, uart.tx);
-	}
-
 	/// @brief Tear down a hardware UART that receives
 	/// @param rxConfig The config given to setup_RX
 	static void teardown_RX(const RP2xxx_UART_Config_t &rxConfig)
@@ -130,104 +108,6 @@ public:
 	static void teardown_TX(const RP2xxx_UART_Config_t &txConfig)
 	{
 		teardownUART(txConfig);
-	}
-
-	/// @brief Tear down a hardware UART that receives and sends
-	/// @param rxConfig The receiving config given to setup_RX_TX
-	/// @param txConfig The sending config given to setup_RX_TX
-	static void teardown_RX_TX(const RP2xxx_UART_Config_t &rxConfig, const RP2xxx_UART_Config_t &txConfig)
-	{
-		teardown_RX(rxConfig);
-		teardown_TX(txConfig);
-	}
-};
-
-/// @brief Helper that has a DMA copy every byte a UART receives into RAM, so no core time is spent per byte
-class RP235x_UART_DMA final
-{
-private:
-	/// @brief Calculate how many of the write address's low bits the DMA ring wraps within
-	/// @brief e.g. 64 bytes gives 6 bits (2^6 = 64)
-	/// @param bufferSize The ring buffer's size (bytes)
-	/// @return The number of bits. Rounded up if bufferSize isn't a power of 2 (e.g. 70 bytes gives 7 bits)
-	static constexpr uint8_t calcRingAddressBits(const uint16_t bufferSize)
-	{
-		uint8_t bits = 0;
-		while ((1 << bits) < bufferSize)
-			++bits;
-
-		return bits;
-	}
-
-public:
-	// A utility, so it's never instantiated
-	RP235x_UART_DMA() = delete;
-
-	/// @brief Start a DMA copying every byte the UART receives into a ring buffer, endlessly. If the channel has
-	/// @brief already been started, it's restarted for the new UART
-	/// @tparam BUFFER_SIZE The ring buffer's size (bytes), deduced from buffer. A power of 2, from 2 to 32768
-	/// @param uart The UART to receive from, set up by RP2xxx_PIO_UART or RP2xxx_UART
-	/// @param buffer The ring buffer. It must be aligned to its own size
-	/// @param channel The DMA channel. If it's -1, a free channel is claimed and it receives that channel
-	/// @return True if started, false if the UART hasn't been set up, the buffer isn't aligned to its own size or
-	/// 		no DMA channel was free
-	template <uint16_t BUFFER_SIZE>
-	static bool setupRing(const RP2xxx_UART_RX_TX_t &uart, volatile uint8_t (&buffer)[BUFFER_SIZE], int &channel)
-	{
-		static_assert((BUFFER_SIZE >= 2) && (BUFFER_SIZE <= 32768), "The DMA ring supports 2 to 32768 bytes");
-
-		constexpr uint8_t RING_ADDRESS_BITS = calcRingAddressBits(BUFFER_SIZE);
-		static_assert((1 << RING_ADDRESS_BITS) == BUFFER_SIZE, "The DMA ring wraps on a power of 2, so the buffer's size must be one");
-
-		if (uart.rx.address == nullptr)
-			return false;
-
-		// The DMA wraps its write address on a boundary of the buffer's size, so the buffer must be aligned to it
-		if ((reinterpret_cast<uintptr_t>(buffer) % BUFFER_SIZE) != 0)
-			return false;
-
-		if (channel < 0)
-		{
-			channel = dma_claim_unused_channel(false);
-			if (channel < 0)
-				return false;
-		}
-		else
-		{
-			// Stop the running transfer, so the channel can be restarted with the new UART
-			dma_channel_abort(static_cast<uint>(channel));
-		}
-
-		// Clear any bytes from a previous UART, so they can't be read as received from the new one
-		for (uint16_t index = 0; index < BUFFER_SIZE; ++index)
-			buffer[index] = 0;
-
-		dma_channel_config config = dma_channel_get_default_config(static_cast<uint>(channel));
-		channel_config_set_transfer_data_size(&config, DMA_SIZE_8);
-		channel_config_set_read_increment(&config, false);
-		channel_config_set_write_increment(&config, true);
-		channel_config_set_ring(&config, true, RING_ADDRESS_BITS);
-		channel_config_set_dreq(&config, uart.rx.dreq);
-
-		// The transfer is endless, so the DMA keeps filling the ring buffer for as long as the UART receives
-		dma_channel_configure(
-			static_cast<uint>(channel),
-			&config,
-			buffer,
-			uart.rx.address,
-			dma_encode_endless_transfer_count(),
-			true);
-
-		return true;
-	}
-
-	static void teardownRing(const int channel)
-	{
-		if (channel >= 0)
-		{
-			dma_channel_abort(static_cast<uint>(channel));
-			dma_channel_unclaim(static_cast<uint>(channel));
-		}
 	}
 };
 
@@ -454,19 +334,6 @@ public:
 		return true;
 	}
 
-	/// @brief Set up a PIO UART that receives and sends
-	/// @param rxConfig The state machine to receive with, and the pin to receive on
-	/// @param txConfig The state machine to send with, and the pin to send on
-	/// @param baudRate The baud rate
-	/// @param uart Receives the UART's info. Only changed if the UART is set up
-	/// @return True if set up,false if either state machine can't be set up (see setupStateMachine)
-	static bool setup_RX_TX(const RP2xxx_PIO_UART_Config_t &rxConfig, const RP2xxx_PIO_UART_Config_t &txConfig,
-							 const UART_Master::BaudRate baudRate, RP2xxx_UART_RX_TX_t &uart)
-	{
-		return setup_RX(rxConfig, baudRate, uart.rx) &&
-			   setup_TX(txConfig, baudRate, uart.tx);
-	}
-
 	/// @brief Tear down a PIO UART that receives, tearing down its state machine
 	/// @param rxConfig The config given to setup_RX
 	static void teardown_RX(const RP2xxx_PIO_UART_Config_t &rxConfig)
@@ -479,14 +346,5 @@ public:
 	static void teardown_TX(const RP2xxx_PIO_UART_Config_t &txConfig)
 	{
 		teardownStateMachine(txConfig);
-	}
-
-	/// @brief Tear down a PIO UART that receives and sends, tearing down its state machines
-	/// @param rxConfig The receiving config given to setup_RX_TX
-	/// @param txConfig The sending config given to setup_RX_TX
-	static void teardown_RX_TX(const RP2xxx_PIO_UART_Config_t &rxConfig, const RP2xxx_PIO_UART_Config_t &txConfig)
-	{
-		teardown_RX(rxConfig);
-		teardown_TX(txConfig);
 	}
 };

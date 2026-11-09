@@ -5,6 +5,7 @@
 #include <pico/time.h>
 #include "tof_laser_range_mini.h"
 #include "rp2xxx_uart.h"
+#include "rp235x_uart_dma.h"
 
 /// @brief Class for the Waveshare TOF Laser Range Sensor Mini (a Nooploop TOFSense-F2 Mini), over UART
 /// @brief Uses Nooploop's NLink TOFSense protocol
@@ -12,34 +13,29 @@
 /// @brief Sending: the core writes each request straight to the UART's TX FIFO. Requests are a few short frames,
 /// @brief which don't justify tying up a DMA channel
 /// @tparam BAUD_RATE The device's baud rate. The default is the rate the device is supplied with
-template <UART_Master::BaudRate BAUD_RATE = UART_Master::BaudRate::Baud921600>
+/// @tparam DMA_BUFFER_SIZE The DMA ring buffer's size (bytes). It must be larger than the bytes kept for the
+/// longest frame
+template <UART_Master::BaudRate BAUD_RATE = UART_Master::BaudRate::Baud921600, uint16_t DMA_BUFFER_SIZE = 64>
 class RP235x_TOF_Laser_Range_Mini_UART_DMA final : public TOF_Laser_Range_Mini
 {
 private:
-	// The DMA buffer wraps on its own size, so its size is a power of 2
-	static constexpr uint16_t DMA_BUFFER_SIZE = 64;
-
-	int _dmaChannel = -1; // -1 until begin() claims a channel
-
-	// The DMA wraps its write address on a boundary of the buffer's size, so the buffer must be aligned to it
-	alignas(DMA_BUFFER_SIZE) volatile uint8_t _dmaBuffer[DMA_BUFFER_SIZE] = {};
-
-	// readFrame keeps the latest bytes it needs for a frame, and the DMA buffer must still hold them. A full buffer's
-	// read and write positions are the same, so it would read as empty: the buffer must be larger than the bytes kept
+	// readFrame keeps the latest bytes it needs for a frame, and the ring must still hold them. A full ring's
+	// read and write positions are the same, so it would read as empty: the ring must be larger than the bytes kept
 	static_assert(calcBytesKept(FRAME0_LENGTH) < DMA_BUFFER_SIZE, "The DMA buffer must be larger than the bytes kept for a NLink_TOFSense_Frame0");
 	static_assert(calcBytesKept(F_SETTING_FRAME0_LENGTH) < DMA_BUFFER_SIZE, "The DMA buffer must be larger than the bytes kept for a NLink_TOFSense_F_Setting_Frame0");
 
-	uint16_t _readIndex = 0; // Where the next byte will be read from in the DMA buffer
-
-	const RP2xxx_UART_RX_TX_t _uart; // The UART the device is connected to
+	const RP235x_UART_DMA_RX_t<DMA_BUFFER_SIZE> _dmaRX; // The DMA ring the device's data is received into
+	const RP2xxx_UART_TX_t _tx;							// The UART requests are sent to the device on
 	bool _started = false;
+
+	uint16_t _readIndex = 0; // Where the next byte will be read from in the DMA buffer
 
 	/// @brief Read where the DMA will write its next byte in the buffer
 	/// @return The DMA buffer index
 	uint16_t readDMABufferWriteIndex() const
 	{
-		const uintptr_t writeAddress = dma_channel_hw_addr(static_cast<uint>(_dmaChannel))->write_addr;
-		const uintptr_t dmaBufferStart = reinterpret_cast<uintptr_t>(_dmaBuffer);
+		const uintptr_t writeAddress = dma_channel_hw_addr(_dmaRX.channel)->write_addr;
+		const uintptr_t dmaBufferStart = reinterpret_cast<uintptr_t>(_dmaRX.buffer);
 
 		return static_cast<uint16_t>(writeAddress - dmaBufferStart);
 	}
@@ -53,12 +49,12 @@ protected:
 	{
 		for (size_t index = 0; index < byteCount; ++index)
 		{
-			while ((*_uart.tx.statusAddress & _uart.tx.fullMask) != 0)
+			while ((*_tx.statusAddress & _tx.fullMask) != 0)
 			{
 				// Wait for space in the TX FIFO
 			}
 
-			*_uart.tx.address = bytes[index];
+			*_tx.address = bytes[index];
 		}
 
 		return true;
@@ -76,7 +72,7 @@ protected:
 	/// @return The byte read
 	uint8_t readByte() override
 	{
-		const uint8_t byte = _dmaBuffer[_readIndex];
+		const uint8_t byte = _dmaRX.buffer[_readIndex];
 		_readIndex = (_readIndex + 1) % DMA_BUFFER_SIZE;
 
 		return byte;
@@ -90,32 +86,29 @@ protected:
 		_readIndex = (readDMABufferWriteIndex() + DMA_BUFFER_SIZE - keepCount) % DMA_BUFFER_SIZE;
 	}
 
-	/// @brief Start the DMA copying every byte received into the DMA buffer, and confirm the device responds
-	/// @return True if started and the device replied
+	/// @brief Check the setup, and confirm the device responds
+	/// @return True if the setup is valid and the device replied
 	bool startDevice()
 	{
-		// The UART must be able to receive and send, at the device's baud rate
-		if ((_uart.rx.address == nullptr) || (_uart.tx.address == nullptr))
+		// The DMA must be receiving and the UART able to send, at the device's baud rate
+		if ((_dmaRX.buffer == nullptr) || (_tx.address == nullptr))
 			return false;
 
-		if ((_uart.rx.baudRate != static_cast<uint32_t>(BAUD_RATE)) || (_uart.tx.baudRate != static_cast<uint32_t>(BAUD_RATE)))
+		if ((_dmaRX.baudRate != static_cast<uint32_t>(BAUD_RATE)) || (_tx.baudRate != static_cast<uint32_t>(BAUD_RATE)))
 			return false;
 
 		Settings settings;
 
-		return RP235x_UART_DMA::setupRing(_uart, _dmaBuffer, _dmaChannel) &&
-			   readSettings(settings); // Read settings - this confirms the device is running
+		return readSettings(settings); // Read settings - this confirms the device is running
 	}
 
 public:
-	/// @param uart The UART the device is connected to, set up by RP2xxx_PIO_UART or RP2xxx_UART
-	explicit RP235x_TOF_Laser_Range_Mini_UART_DMA(const RP2xxx_UART_RX_TX_t &uart)
-		: TOF_Laser_Range_Mini(static_cast<uint32_t>(BAUD_RATE)), _uart(uart) {}
-
-	~RP235x_TOF_Laser_Range_Mini_UART_DMA() override
-	{
-		RP235x_UART_DMA::teardownRing(_dmaChannel);
-	}
+	/// @param dmaRX The DMA ring to receive the device's data into, set up by RP235x_UART_DMA
+	/// @param tx The UART to send requests to the device on, set up by RP2xxx_PIO_UART or RP2xxx_UART
+	RP235x_TOF_Laser_Range_Mini_UART_DMA(const RP235x_UART_DMA_RX_t<DMA_BUFFER_SIZE> &dmaRX,
+										 const RP2xxx_UART_TX_t &tx) : TOF_Laser_Range_Mini(static_cast<uint32_t>(BAUD_RATE)),
+																	   _dmaRX(dmaRX),
+																	   _tx(tx) {}
 
 	/// @brief Start the device and confirm it responds
 	/// @param retryCount Number of attempts before giving up
