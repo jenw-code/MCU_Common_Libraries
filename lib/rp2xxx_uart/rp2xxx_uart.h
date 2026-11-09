@@ -132,7 +132,7 @@ public:
 	/// @return True if started, false if the UART hasn't been created, the buffer isn't aligned to its own size or
 	/// 		no DMA channel was free
 	template <uint16_t BUFFER_SIZE>
-	static bool startRing(const RP2xxx_UART_RX_TX_t &uart, volatile uint8_t (&buffer)[BUFFER_SIZE], int &channel)
+	static bool createRing(const RP2xxx_UART_RX_TX_t &uart, volatile uint8_t (&buffer)[BUFFER_SIZE], int &channel)
 	{
 		static_assert((BUFFER_SIZE >= 2) && (BUFFER_SIZE <= 32768), "The DMA ring supports 2 to 32768 bytes");
 
@@ -179,6 +179,15 @@ public:
 			true);
 
 		return true;
+	}
+
+	static bool deleteRing(const int channel)
+	{
+		if (channel >= 0)
+		{
+			dma_channel_abort(static_cast<uint>(channel));
+			dma_channel_unclaim(static_cast<uint>(channel));
+		}
 	}
 };
 
@@ -306,7 +315,7 @@ public:
 		sm_config_set_sideset(&config, TX_SIDE_SET_BITS, true, false); // Optional, and sets the pin's level, not its direction
 		sm_config_set_sideset_pins(&config, txPin);
 		sm_config_set_out_pins(&config, txPin, 1);
-		sm_config_set_out_shift(&config, true, false, 32); // Shift right, so bytes go LSB first. No autopull, as the program pulls
+		sm_config_set_out_shift(&config, true, false, 32);	// Shift right, so bytes go LSB first. No autopull, as the program pulls
 		sm_config_set_fifo_join(&config, PIO_FIFO_JOIN_TX); // Only sending, so double the TX FIFO
 
 		const float cyclesPerSecond = static_cast<float>(TX_CYCLES_PER_BIT) * static_cast<float>(static_cast<uint32_t>(baudRate));
