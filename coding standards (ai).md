@@ -84,7 +84,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 ### Structure and OO
 - **The base class defines the interface.** Each derived class may implement it in its own way, or the base may implement it once. The test: a base-class variable set to either derived class, and the code still works.
 - **Classes with the same functionality have the same structure and behaviour.** Compare them side by side after every change.
-- **Duplication means the design has a flaw.** Shared logic lives once; the classes that differ supply only what genuinely differs.
+- **Duplication means the design has a flaw.** Shared logic lives once; the classes that differ supply only what genuinely differs. The exception: a small, simple piece (a few lines) can be repeated when sharing it would put it somewhere that confuses that place's purpose.
 - **Don't split one flow across classes.** A developer shouldn't have to jump between classes to follow one flow. Keep the whole flow in one place, and have the others supply self-contained pieces.
 - **Think about each function's responsibility** to decide where logic belongs. Logic in the wrong place sends a false message about the code around it.
 - **Don't conflate separate concerns.** If a function is hard to name, it's probably doing two things. A function earns its place when its name is clear and its purpose is single.
@@ -92,12 +92,14 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Structure in proportion to functionality.** A whole class to understand, for a small piece of logic, is disproportionate.
 - **A struct is for data.** Constants don't go in data structs, and a struct's fields shouldn't be half unused depending on a "kind".
 - **Describe similar things the same way.** If one half of a pair is described one way, the other half is described the same way.
-- **One source of truth.** If a value must be stated in two places, one is validated against the other.
+- **One source of truth.** If a value must be stated in two places, one is validated against the other. Better still, one constant drives every place that must agree, and the types make any disagreement a compile error.
 - **Every base class with virtual functions has a public virtual destructor.** Deleting an object through a base pointer is normal OO.
 - **A class frees only the resources it created.** Resources given to it are the giver's to free.
 - **Whatever setup gives you, you give back to teardown.** The caller already knows the values it chose, so they don't need to be stored in the result structs.
 - **Configs are `constexpr`-friendly:** hold indices, not pointers that come from casts.
 - **Setup takes the resource explicitly** rather than picking one itself, so it fits a planned allocation.
+- **Use a distinct type to force a required step.** If something must be set up a particular way first, give the result its own type and take that type, even if it duplicates another struct's fields. The compiler then enforces what a comment could only ask for, and the signature itself tells the developer what the class requires.
+- **Things configured separately are passed separately.** Don't bundle independent things into one struct or call; kept apart, they can be mixed.
 - **File order follows use:** what you give (the config), then what you get back, then the helpers that turn one into the other.
 - **No complex web of dependencies** between libraries.
 - **Keep one goal, and judge every decision against it.** Don't add complexity for a goal that isn't wanted, such as genericity nobody needs.
