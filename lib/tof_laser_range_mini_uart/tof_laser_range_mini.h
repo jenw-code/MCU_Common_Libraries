@@ -391,7 +391,10 @@ protected:
 
 public:
 	// Virtual, so either version can be deleted through a base pointer
-	virtual ~TOF_Laser_Range_Mini() = default;
+	virtual ~TOF_Laser_Range_Mini()
+	{
+		disableAutoChecker();
+	}
 
 	/// @brief Start the device and confirm it responds
 	/// @param retryCount Number of attempts before giving up
