@@ -1,13 +1,20 @@
 #pragma once
 
 #include <Arduino.h>
-#include <PIOProgram.h>
 #include <hardware/clocks.h>
 #include <hardware/dma.h>
 #include <hardware/gpio.h>
 #include <hardware/pio.h>
 #include <hardware/uart.h>
 #include "uart_master.h"
+
+/// @brief One direction of a hardware UART: the UART it uses, and its pin. The UART is held as its index, not as a
+/// @brief uart_inst_t pointer, so a config can be a constexpr (the pointer comes from a cast that isn't allowed in one)
+struct RP2xxx_UART_Config_t final
+{
+	uint8_t uartIndex = 0; // 0 to NUM_UARTS - 1
+	uint8_t pin = 0;	   // The GPIO the UART receives or sends on. It must be one of that UART's pins
+};
 
 struct RP2xxx_UART_RX_t final
 {
@@ -36,21 +43,31 @@ struct RP2xxx_UART_RX_TX_t final
 /// @brief Its RX FIFO is only 32 bytes, so the bytes received must be read as they arrive, e.g. by a DMA
 class RP2xxx_UART final
 {
+private:
+	/// @brief Tear down one direction of a hardware UART: stop the UART, and return its pin to GPIO
+	/// @param config The UART and its pin, as given to setup_RX or setup_TX
+	static void teardownUART(const RP2xxx_UART_Config_t &config)
+	{
+		uart_deinit(uart_get_instance(config.uartIndex));
+		gpio_deinit(config.pin);
+	}
+
 public:
 	// A utility, so it's never instantiated
 	RP2xxx_UART() = delete;
 
-	/// @brief Create a hardware UART that receives
-	/// @param uartInstance The hardware UART (uart0 or uart1)
-	/// @param rxPin The GPIO to receive on. It must be one of the UART's RX pins
+	/// @brief Set up a hardware UART that receives
+	/// @param rxConfig The UART to receive with, and the pin to receive on. The pin must be one of the UART's RX pins
 	/// @param baudRate The baud rate
-	/// @param rx Receives the UART's RX info. Only changed if the UART is created
-	/// @return True if created, false if uartInstance is null
-	static bool create_RX(uart_inst_t *const uartInstance, const uint8_t rxPin, const UART_Master::BaudRate baudRate,
-						  RP2xxx_UART_RX_t &rx)
+	/// @param rx Receives the UART's RX info. Only changed if the UART is set up
+	/// @return True if set up,false if the UART doesn't exist
+	static bool setup_RX(const RP2xxx_UART_Config_t &rxConfig, const UART_Master::BaudRate baudRate, RP2xxx_UART_RX_t &rx)
 	{
-		if (uartInstance == nullptr)
+		if (rxConfig.uartIndex >= NUM_UARTS)
 			return false;
+
+		uart_inst_t *const uartInstance = uart_get_instance(rxConfig.uartIndex);
+		const uint rxPin = rxConfig.pin;
 
 		// Enable the DMA requests (the frame format is set to 8N1: 8 data bits, no parity, 1 stop bit)
 		uart_init(uartInstance, static_cast<uint>(baudRate));
@@ -63,17 +80,18 @@ public:
 		return true;
 	}
 
-	/// @brief Create a hardware UART that sends
-	/// @param uartInstance The hardware UART (uart0 or uart1)
-	/// @param txPin The GPIO to send on. It must be one of the UART's TX pins
+	/// @brief Set up a hardware UART that sends
+	/// @param txConfig The UART to send with, and the pin to send on. The pin must be one of the UART's TX pins
 	/// @param baudRate The baud rate
-	/// @param tx Receives the UART's TX info. Only changed if the UART is created
-	/// @return True if created, false if uartInstance is null
-	static bool create_TX(uart_inst_t *const uartInstance, const uint8_t txPin, const UART_Master::BaudRate baudRate,
-						  RP2xxx_UART_TX_t &tx)
+	/// @param tx Receives the UART's TX info. Only changed if the UART is set up
+	/// @return True if set up,false if the UART doesn't exist
+	static bool setup_TX(const RP2xxx_UART_Config_t &txConfig, const UART_Master::BaudRate baudRate, RP2xxx_UART_TX_t &tx)
 	{
-		if (uartInstance == nullptr)
+		if (txConfig.uartIndex >= NUM_UARTS)
 			return false;
+
+		uart_inst_t *const uartInstance = uart_get_instance(txConfig.uartIndex);
+		const uint txPin = txConfig.pin;
 
 		// Enable the DMA requests (the frame format is set to 8N1: 8 data bits, no parity, 1 stop bit)
 		uart_init(uartInstance, static_cast<uint>(baudRate));
@@ -87,18 +105,40 @@ public:
 		return true;
 	}
 
-	/// @brief Create a hardware UART that receives and sends
-	/// @param uartInstance The hardware UART (uart0 or uart1)
-	/// @param rxPin The GPIO to receive on. It must be one of the UART's RX pins
-	/// @param txPin The GPIO to send on. It must be one of the UART's TX pins
+	/// @brief Set up a hardware UART that receives and sends
+	/// @param rxConfig The UART to receive with, and the pin to receive on
+	/// @param txConfig The UART to send with, and the pin to send on
 	/// @param baudRate The baud rate
-	/// @param uart Receives the UART's info. Only changed if the UART is created
-	/// @return True if created, false if uartInstance is null
-	static bool create_RX_TX(uart_inst_t *const uartInstance, const uint8_t rxPin, const uint8_t txPin,
+	/// @param uart Receives the UART's info. Only changed if the UART is set up
+	/// @return True if set up,false if either UART doesn't exist
+	static bool setup_RX_TX(const RP2xxx_UART_Config_t &rxConfig, const RP2xxx_UART_Config_t &txConfig,
 							 const UART_Master::BaudRate baudRate, RP2xxx_UART_RX_TX_t &uart)
 	{
-		return create_RX(uartInstance, rxPin, baudRate, uart.rx) &&
-			   create_TX(uartInstance, txPin, baudRate, uart.tx);
+		return setup_RX(rxConfig, baudRate, uart.rx) &&
+			   setup_TX(txConfig, baudRate, uart.tx);
+	}
+
+	/// @brief Tear down a hardware UART that receives
+	/// @param rxConfig The config given to setup_RX
+	static void teardown_RX(const RP2xxx_UART_Config_t &rxConfig)
+	{
+		teardownUART(rxConfig);
+	}
+
+	/// @brief Tear down a hardware UART that sends
+	/// @param txConfig The config given to setup_TX
+	static void teardown_TX(const RP2xxx_UART_Config_t &txConfig)
+	{
+		teardownUART(txConfig);
+	}
+
+	/// @brief Tear down a hardware UART that receives and sends
+	/// @param rxConfig The receiving config given to setup_RX_TX
+	/// @param txConfig The sending config given to setup_RX_TX
+	static void teardown_RX_TX(const RP2xxx_UART_Config_t &rxConfig, const RP2xxx_UART_Config_t &txConfig)
+	{
+		teardown_RX(rxConfig);
+		teardown_TX(txConfig);
 	}
 };
 
@@ -126,13 +166,13 @@ public:
 	/// @brief Start a DMA copying every byte the UART receives into a ring buffer, endlessly. If the channel has
 	/// @brief already been started, it's restarted for the new UART
 	/// @tparam BUFFER_SIZE The ring buffer's size (bytes), deduced from buffer. A power of 2, from 2 to 32768
-	/// @param uart The UART to receive from, created by RP2xxx_PIO_UART or RP2xxx_UART
+	/// @param uart The UART to receive from, set up by RP2xxx_PIO_UART or RP2xxx_UART
 	/// @param buffer The ring buffer. It must be aligned to its own size
 	/// @param channel The DMA channel. If it's -1, a free channel is claimed and it receives that channel
-	/// @return True if started, false if the UART hasn't been created, the buffer isn't aligned to its own size or
+	/// @return True if started, false if the UART hasn't been set up, the buffer isn't aligned to its own size or
 	/// 		no DMA channel was free
 	template <uint16_t BUFFER_SIZE>
-	static bool createRing(const RP2xxx_UART_RX_TX_t &uart, volatile uint8_t (&buffer)[BUFFER_SIZE], int &channel)
+	static bool setupRing(const RP2xxx_UART_RX_TX_t &uart, volatile uint8_t (&buffer)[BUFFER_SIZE], int &channel)
 	{
 		static_assert((BUFFER_SIZE >= 2) && (BUFFER_SIZE <= 32768), "The DMA ring supports 2 to 32768 bytes");
 
@@ -181,7 +221,7 @@ public:
 		return true;
 	}
 
-	static bool deleteRing(const int channel)
+	static void teardownRing(const int channel)
 	{
 		if (channel >= 0)
 		{
@@ -193,11 +233,28 @@ public:
 
 //--------------------------------------------------------------------------------------------------
 
+/// @brief One direction of a PIO UART: the state machine it uses, and its pin. The PIO is held as its index, not as a
+/// @brief PIO pointer, so a config can be a constexpr (the pointer comes from a cast that isn't allowed in one)
+struct RP2xxx_PIO_UART_Config_t final
+{
+	uint8_t pioIndex = 0;	  // 0 to NUM_PIOS - 1
+	uint8_t stateMachine = 0; // 0 to NUM_PIO_STATE_MACHINES - 1
+	uint8_t pin = 0;		  // The GPIO the state machine receives or sends on
+};
+
 /// @brief Helper that receives and sends UART (8N1) on any GPIOs using a PIO
 /// @brief It has no RX buffer, so the bytes received must be read as they arrive, e.g. by a DMA
 class RP2xxx_PIO_UART final
 {
 private:
+	// Where a program has been loaded into a PIO's instruction memory
+	// No default member initializers, as they can't be used inside the enclosing class. Only used in arrays
+	// initialised with = {}, which zeroes every element
+	struct LoadedProgram final
+	{
+		bool loaded;
+		uint offset;
+	};
 	// PIO receiver: pico-examples uart_rx_mini (uart_rx.pio, Copyright (c) 2020 Raspberry Pi (Trading) Ltd.,
 	// BSD-3-Clause), pre-assembled because the build doesn't run pioasm. It receives 8N1 without checking the stop
 	// bit, and pushes each byte to the top byte of the RX FIFO word
@@ -245,35 +302,97 @@ private:
 		.pio_version = 0,
 	};
 
-	// Shared by every receiver created, so the PIO receiver is only loaded once per PIO
-	static inline PIOProgram _pioReceiver{&RX_PROGRAM};
+	// Each program is loaded once per PIO, and shared by every state machine in it that uses the program
+	static inline LoadedProgram _rxPrograms[NUM_PIOS] = {};
+	static inline LoadedProgram _txPrograms[NUM_PIOS] = {};
 
-	// Shared by every transmitter created, so the PIO transmitter is only loaded once per PIO
-	static inline PIOProgram _pioTransmitter{&TX_PROGRAM};
+	/// @brief Load a program into a PIO, unless it's already loaded there
+	/// @param program The program
+	/// @param pio The PIO
+	/// @param loadedProgram Where the program is in this PIO. Updated when the program is loaded
+	/// @return True if the program is loaded, false if the PIO has no room for it
+	static bool loadProgram(const pio_program_t &program, const PIO pio, LoadedProgram &loadedProgram)
+	{
+		if (loadedProgram.loaded)
+			return true;
+
+		if (!pio_can_add_program(pio, &program))
+			return false;
+
+		loadedProgram.offset = pio_add_program(pio, &program);
+		loadedProgram.loaded = true;
+		return true;
+	}
+
+	/// @brief Set up a state machine for a UART: claim it, with its program loaded, checking the pin can be used by it
+	/// @param config The state machine and its pin
+	/// @param program The program the state machine runs
+	/// @param loadedPrograms Where the program is in each PIO
+	/// @param offset Receives where the program is in the state machine's PIO
+	/// @return True if set up,false if the state machine doesn't exist or is already claimed, the pin is outside
+	/// 		its PIO's 32 pin window, or the PIO has no room for the program
+	static bool setupStateMachine(const RP2xxx_PIO_UART_Config_t &config, const pio_program_t &program,
+								   LoadedProgram (&loadedPrograms)[NUM_PIOS], uint &offset)
+	{
+		if ((config.pioIndex >= NUM_PIOS) || (config.stateMachine >= NUM_PIO_STATE_MACHINES))
+			return false;
+
+		const PIO pio = pio_get_instance(config.pioIndex);
+
+		// A PIO's GPIO base is shared by its state machines, so it's set as part of the PIO allocation, not here
+		const uint gpioBase = pio_get_gpio_base(pio);
+		if ((config.pin < gpioBase) || (config.pin >= (gpioBase + 32)))
+			return false;
+
+		// pio_sm_claim() halts if the state machine is already claimed, rather than failing
+		if (pio_sm_is_claimed(pio, config.stateMachine))
+			return false;
+
+		LoadedProgram &loadedProgram = loadedPrograms[config.pioIndex];
+		if (!loadProgram(program, pio, loadedProgram))
+			return false;
+
+		pio_sm_claim(pio, config.stateMachine);
+		offset = loadedProgram.offset;
+		return true;
+	}
+
+	/// @brief Tear down a state machine set up by setupStateMachine: stop it, unclaim it, and return its pin to GPIO
+	/// @param config The state machine and its pin, as given to setupStateMachine
+	static void teardownStateMachine(const RP2xxx_PIO_UART_Config_t &config)
+	{
+		const PIO pio = pio_get_instance(config.pioIndex);
+		pio_sm_set_enabled(pio, config.stateMachine, false);
+		pio_sm_unclaim(pio, config.stateMachine);
+		gpio_deinit(config.pin);
+	}
 
 public:
 	// A utility, so it's never instantiated
 	RP2xxx_PIO_UART() = delete;
 
-	/// @brief Create a PIO UART that receives
-	/// @param rxPin The GPIO to receive on
+	/// @brief Set up a PIO UART that receives
+	/// @param rxConfig The state machine to receive with, and the pin to receive on. Its PIO's GPIO base must already
+	/// let it reach the pin
 	/// @param baudRate The baud rate
-	/// @param rx Receives the UART's RX info. Only changed if the UART is created
-	/// @return True if created, false if no PIO state machine was free
-	static bool create_RX(const uint8_t rxPin, const UART_Master::BaudRate baudRate, RP2xxx_UART_RX_t &rx)
+	/// @param rx Receives the UART's RX info. Only changed if the UART is set up
+	/// @return True if set up,false if the state machine can't be set up (see setupStateMachine)
+	static bool setup_RX(const RP2xxx_PIO_UART_Config_t &rxConfig, const UART_Master::BaudRate baudRate, RP2xxx_UART_RX_t &rx)
 	{
-		PIO pio;
-		int stateMachine;
-		int offset;
-		if (!_pioReceiver.prepare(&pio, &stateMachine, &offset, rxPin, 1))
+		uint offset;
+		if (!setupStateMachine(rxConfig, RX_PROGRAM, _rxPrograms, offset))
 			return false;
 
-		pio_sm_set_consecutive_pindirs(pio, static_cast<uint>(stateMachine), rxPin, 1, false);
+		const PIO pio = pio_get_instance(rxConfig.pioIndex);
+		const uint stateMachine = rxConfig.stateMachine;
+		const uint rxPin = rxConfig.pin;
+
+		pio_sm_set_consecutive_pindirs(pio, stateMachine, rxPin, 1, false);
 		pio_gpio_init(pio, rxPin);
 		gpio_pull_up(rxPin); // The UART line idles high
 
 		pio_sm_config config = pio_get_default_sm_config();
-		sm_config_set_wrap(&config, static_cast<uint>(offset) + RX_WRAP_TARGET, static_cast<uint>(offset) + RX_WRAP);
+		sm_config_set_wrap(&config, offset + RX_WRAP_TARGET, offset + RX_WRAP);
 		sm_config_set_in_pins(&config, rxPin);
 		sm_config_set_in_shift(&config, true, true, RX_BITS_PER_PUSH); // Shift right, autopush each byte
 		sm_config_set_fifo_join(&config, PIO_FIFO_JOIN_RX);			   // Only receiving, so double the RX FIFO
@@ -281,37 +400,40 @@ public:
 		const float cyclesPerSecond = static_cast<float>(RX_CYCLES_PER_BIT) * static_cast<float>(static_cast<uint32_t>(baudRate));
 		sm_config_set_clkdiv(&config, static_cast<float>(clock_get_hz(clk_sys)) / cyclesPerSecond);
 
-		pio_sm_init(pio, static_cast<uint>(stateMachine), static_cast<uint>(offset), &config);
-		pio_sm_set_enabled(pio, static_cast<uint>(stateMachine), true);
+		pio_sm_init(pio, stateMachine, offset, &config);
+		pio_sm_set_enabled(pio, stateMachine, true);
 
 		rx.address = reinterpret_cast<const volatile uint8_t *>(&pio->rxf[stateMachine]) + RX_FIFO_TOP_BYTE;
-		rx.dreq = pio_get_dreq(pio, static_cast<uint>(stateMachine), false);
+		rx.dreq = pio_get_dreq(pio, stateMachine, false);
 		rx.baudRate = static_cast<uint32_t>(baudRate);
 
 		return true;
 	}
 
-	/// @brief Create a PIO UART that sends
-	/// @param txPin The GPIO to send on
+	/// @brief Set up a PIO UART that sends
+	/// @param txConfig The state machine to send with, and the pin to send on. Its PIO's GPIO base must already let
+	/// it reach the pin
 	/// @param baudRate The baud rate
-	/// @param tx Receives the UART's TX info. Only changed if the UART is created
-	/// @return True if created, false if no PIO state machine was free
-	static bool create_TX(const uint8_t txPin, const UART_Master::BaudRate baudRate, RP2xxx_UART_TX_t &tx)
+	/// @param tx Receives the UART's TX info. Only changed if the UART is set up
+	/// @return True if set up,false if the state machine can't be set up (see setupStateMachine)
+	static bool setup_TX(const RP2xxx_PIO_UART_Config_t &txConfig, const UART_Master::BaudRate baudRate, RP2xxx_UART_TX_t &tx)
 	{
-		PIO pio;
-		int stateMachine;
-		int offset;
-		if (!_pioTransmitter.prepare(&pio, &stateMachine, &offset, txPin, 1))
+		uint offset;
+		if (!setupStateMachine(txConfig, TX_PROGRAM, _txPrograms, offset))
 			return false;
+
+		const PIO pio = pio_get_instance(txConfig.pioIndex);
+		const uint stateMachine = txConfig.stateMachine;
+		const uint txPin = txConfig.pin;
 
 		// The UART line idles high, so the pin is driven high before the state machine takes it over
 		const uint64_t txPinMask = static_cast<uint64_t>(1) << txPin;
-		pio_sm_set_pins_with_mask64(pio, static_cast<uint>(stateMachine), txPinMask, txPinMask);
-		pio_sm_set_consecutive_pindirs(pio, static_cast<uint>(stateMachine), txPin, 1, true);
+		pio_sm_set_pins_with_mask64(pio, stateMachine, txPinMask, txPinMask);
+		pio_sm_set_consecutive_pindirs(pio, stateMachine, txPin, 1, true);
 		pio_gpio_init(pio, txPin);
 
 		pio_sm_config config = pio_get_default_sm_config();
-		sm_config_set_wrap(&config, static_cast<uint>(offset) + TX_WRAP_TARGET, static_cast<uint>(offset) + TX_WRAP);
+		sm_config_set_wrap(&config, offset + TX_WRAP_TARGET, offset + TX_WRAP);
 		sm_config_set_sideset(&config, TX_SIDE_SET_BITS, true, false); // Optional, and sets the pin's level, not its direction
 		sm_config_set_sideset_pins(&config, txPin);
 		sm_config_set_out_pins(&config, txPin, 1);
@@ -321,27 +443,50 @@ public:
 		const float cyclesPerSecond = static_cast<float>(TX_CYCLES_PER_BIT) * static_cast<float>(static_cast<uint32_t>(baudRate));
 		sm_config_set_clkdiv(&config, static_cast<float>(clock_get_hz(clk_sys)) / cyclesPerSecond);
 
-		pio_sm_init(pio, static_cast<uint>(stateMachine), static_cast<uint>(offset), &config);
-		pio_sm_set_enabled(pio, static_cast<uint>(stateMachine), true);
+		pio_sm_init(pio, stateMachine, offset, &config);
+		pio_sm_set_enabled(pio, stateMachine, true);
 
 		tx.address = &pio->txf[stateMachine];
 		tx.statusAddress = &pio->fstat;
-		tx.fullMask = static_cast<uint32_t>(1) << (PIO_FSTAT_TXFULL_LSB + static_cast<uint>(stateMachine));
+		tx.fullMask = static_cast<uint32_t>(1) << (PIO_FSTAT_TXFULL_LSB + stateMachine);
 		tx.baudRate = static_cast<uint32_t>(baudRate);
 
 		return true;
 	}
 
-	/// @brief Create a PIO UART that receives and sends
-	/// @param rxPin The GPIO to receive on
-	/// @param txPin The GPIO to send on
+	/// @brief Set up a PIO UART that receives and sends
+	/// @param rxConfig The state machine to receive with, and the pin to receive on
+	/// @param txConfig The state machine to send with, and the pin to send on
 	/// @param baudRate The baud rate
-	/// @param uart Receives the UART's info. Only changed if the UART is created
-	/// @return True if created, false if two PIO state machines weren't free
-	static bool create_RX_TX(const uint8_t rxPin, const uint8_t txPin, const UART_Master::BaudRate baudRate,
-							 RP2xxx_UART_RX_TX_t &uart)
+	/// @param uart Receives the UART's info. Only changed if the UART is set up
+	/// @return True if set up,false if either state machine can't be set up (see setupStateMachine)
+	static bool setup_RX_TX(const RP2xxx_PIO_UART_Config_t &rxConfig, const RP2xxx_PIO_UART_Config_t &txConfig,
+							 const UART_Master::BaudRate baudRate, RP2xxx_UART_RX_TX_t &uart)
 	{
-		return create_RX(rxPin, baudRate, uart.rx) &&
-			   create_TX(txPin, baudRate, uart.tx);
+		return setup_RX(rxConfig, baudRate, uart.rx) &&
+			   setup_TX(txConfig, baudRate, uart.tx);
+	}
+
+	/// @brief Tear down a PIO UART that receives, tearing down its state machine
+	/// @param rxConfig The config given to setup_RX
+	static void teardown_RX(const RP2xxx_PIO_UART_Config_t &rxConfig)
+	{
+		teardownStateMachine(rxConfig);
+	}
+
+	/// @brief Tear down a PIO UART that sends, tearing down its state machine
+	/// @param txConfig The config given to setup_TX
+	static void teardown_TX(const RP2xxx_PIO_UART_Config_t &txConfig)
+	{
+		teardownStateMachine(txConfig);
+	}
+
+	/// @brief Tear down a PIO UART that receives and sends, tearing down its state machines
+	/// @param rxConfig The receiving config given to setup_RX_TX
+	/// @param txConfig The sending config given to setup_RX_TX
+	static void teardown_RX_TX(const RP2xxx_PIO_UART_Config_t &rxConfig, const RP2xxx_PIO_UART_Config_t &txConfig)
+	{
+		teardown_RX(rxConfig);
+		teardown_TX(txConfig);
 	}
 };

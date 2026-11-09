@@ -101,18 +101,18 @@ protected:
 
 		Settings settings;
 
-		return RP235x_UART_DMA::createRing(_uart, _dmaBuffer, _dmaChannel) &&
+		return RP235x_UART_DMA::setupRing(_uart, _dmaBuffer, _dmaChannel) &&
 			   readSettings(settings); // Read settings - this confirms the device is running
 	}
 
 public:
-	/// @param uart The UART the device is connected to, created by RP2xxx_PIO_UART or RP2xxx_UART
+	/// @param uart The UART the device is connected to, set up by RP2xxx_PIO_UART or RP2xxx_UART
 	explicit RP235x_TOF_Laser_Range_Mini_UART_DMA(const RP2xxx_UART_RX_TX_t &uart)
 		: TOF_Laser_Range_Mini(static_cast<uint32_t>(BAUD_RATE)), _uart(uart) {}
 
 	~RP235x_TOF_Laser_Range_Mini_UART_DMA() override
 	{
-		RP235x_UART_DMA::deleteRing(_dmaChannel);
+		RP235x_UART_DMA::teardownRing(_dmaChannel);
 	}
 
 	/// @brief Start the device and confirm it responds
