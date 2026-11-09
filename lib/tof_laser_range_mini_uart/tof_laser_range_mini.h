@@ -390,6 +390,9 @@ protected:
 	explicit TOF_Laser_Range_Mini(const uint32_t baudRate) : _baudRate(baudRate) {}
 
 public:
+	// Virtual, so either version can be deleted through a base pointer
+	virtual ~TOF_Laser_Range_Mini() = default;
+
 	/// @brief Start the device and confirm it responds
 	/// @param retryCount Number of attempts before giving up
 	/// @return True if the device started

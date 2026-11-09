@@ -50,6 +50,9 @@ public:
 	/// @param baudRate The device's baud rate
 	UART_Master(HardwareSerial &serial, const BaudRate baudRate);
 
+	// Virtual, so a device can be deleted through a base pointer
+	virtual ~UART_Master() = default;
+
 	/// @brief Start the device
 	/// @param retryCount Number of attempts before giving up
 	/// @return True if the device started

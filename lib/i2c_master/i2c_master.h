@@ -86,6 +86,9 @@ public:
 	/// @param i2cWire The I2C bus the device is connected to
 	explicit I2C_Master(const uint8_t i2cAddr, TwoWire &i2cWire = Wire);
 
+	// Virtual, so a device can be deleted through a base pointer
+	virtual ~I2C_Master() = default;
+
 	/// @brief Start the device
 	/// @param retryCount Number of attempts before giving up
 	/// @return True if the device started
