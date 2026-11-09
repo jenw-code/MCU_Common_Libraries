@@ -62,4 +62,12 @@ public:
 	/// @param serial The UART the device is connected to (hardware or PIO serial)
 	explicit TOF_Laser_Range_Mini_UART(HardwareSerial &serial)
 		: TOF_Laser_Range_Mini(static_cast<uint32_t>(BAUD_RATE)), UART_Master(serial, BAUD_RATE) {}
+
+	/// @brief Start the device and confirm it responds
+	/// @param retryCount Number of attempts before giving up
+	/// @return True if the device started
+	bool begin(const uint8_t retryCount = 3) override
+	{
+		return UART_Master::begin(retryCount);
+	}
 };

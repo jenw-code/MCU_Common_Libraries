@@ -29,7 +29,8 @@ private:
 
 	uint16_t _readIndex = 0; // Where the next byte will be read from in the DMA buffer
 
-	RP2xxx_UART_TX_t _tx = {}; // Where bytes sent to the device are written, set by begin()
+	const RP2xxx_UART_RX_TX_t _uart; // The UART the device is connected to
+	bool _started = false;
 
 	/// @brief Read where the DMA will write its next byte in the buffer
 	/// @return The DMA buffer index
@@ -50,12 +51,12 @@ protected:
 	{
 		for (size_t index = 0; index < byteCount; ++index)
 		{
-			while ((*_tx.statusAddress & _tx.fullMask) != 0)
+			while ((*_uart.tx.statusAddress & _uart.tx.fullMask) != 0)
 			{
 				// Wait for space in the TX FIFO
 			}
 
-			*_tx.address = bytes[index];
+			*_uart.tx.address = bytes[index];
 		}
 
 		return true;
@@ -87,26 +88,47 @@ protected:
 		_readIndex = (readDMABufferWriteIndex() + DMA_BUFFER_SIZE - keepCount) % DMA_BUFFER_SIZE;
 	}
 
-public:
-	RP235x_TOF_Laser_Range_Mini_UART_DMA() : TOF_Laser_Range_Mini(static_cast<uint32_t>(BAUD_RATE)) {}
-
-	/// @brief Start the DMA copying every byte received into the DMA buffer, and keep the UART's TX for sending
-	/// @param uart The UART the device is connected to, created by RP2xxx_PIO_UART or RP2xxx_UART
+	/// @brief Start the DMA copying every byte received into the DMA buffer, and confirm the device responds
 	/// @return True if started and the device replied
-	bool begin(const RP2xxx_UART_RX_TX_t &uart)
+	bool startDevice()
 	{
 		// The UART must be able to receive and send, at the device's baud rate
-		if ((uart.rx.address == nullptr) || (uart.tx.address == nullptr))
+		if ((_uart.rx.address == nullptr) || (_uart.tx.address == nullptr))
 			return false;
 
-		if ((uart.rx.baudRate != static_cast<uint32_t>(BAUD_RATE)) || (uart.tx.baudRate != static_cast<uint32_t>(BAUD_RATE)))
+		if ((_uart.rx.baudRate != static_cast<uint32_t>(BAUD_RATE)) || (_uart.tx.baudRate != static_cast<uint32_t>(BAUD_RATE)))
 			return false;
-
-		_tx = uart.tx;
 
 		Settings settings;
 
-		return RP235x_UART_DMA::startRing(uart, _dmaBuffer, _dmaChannel) &&
+		return RP235x_UART_DMA::startRing(_uart, _dmaBuffer, _dmaChannel) &&
 			   readSettings(settings); // Read settings - this confirms the device is running
+	}
+
+public:
+	/// @param uart The UART the device is connected to, created by RP2xxx_PIO_UART or RP2xxx_UART
+	explicit RP235x_TOF_Laser_Range_Mini_UART_DMA(const RP2xxx_UART_RX_TX_t &uart)
+		: TOF_Laser_Range_Mini(static_cast<uint32_t>(BAUD_RATE)), _uart(uart) {}
+
+	/// @brief Start the device and confirm it responds
+	/// @param retryCount Number of attempts before giving up
+	/// @return True if the device started
+	bool begin(const uint8_t retryCount = 3) override
+	{
+		if (!_started)
+		{
+			uint8_t attempt = 0;
+			do
+			{
+				if (attempt > 0)
+					delay(100);
+
+				_started = startDevice();
+
+				++attempt;
+			} while (!_started && (attempt < retryCount));
+		}
+
+		return _started;
 	}
 };

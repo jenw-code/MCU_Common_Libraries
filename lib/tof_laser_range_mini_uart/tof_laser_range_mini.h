@@ -245,7 +245,7 @@ protected:
 	/// @brief Called by the repeating timer, in interrupt context
 	/// @param timer The repeating timer, whose user data is the instance being checked
 	/// @return True, to keep the timer repeating
-	static bool checkDistance(repeating_timer_t *timer)
+	static bool handleAutoCheckTimer(repeating_timer_t *timer)
 	{
 		if (timer->user_data != nullptr)
 		{
@@ -390,6 +390,11 @@ protected:
 	explicit TOF_Laser_Range_Mini(const uint32_t baudRate) : _baudRate(baudRate) {}
 
 public:
+	/// @brief Start the device and confirm it responds
+	/// @param retryCount Number of attempts before giving up
+	/// @return True if the device started
+	virtual bool begin(const uint8_t retryCount = 3) = 0;
+
 	/// @brief Read the device's settings, from the NLink_TOFSense_F_Setting_Frame0 it sends in reply to a request.
 	/// @param settings Receives the settings. Only changed if the read succeeds
 	/// @return True if the request was sent and a frame with a valid Sum Check arrived in time
@@ -467,8 +472,8 @@ public:
 	}
 
 	/// @brief Check the distance periodically, calling the callback whenever it's below the threshold
-	/// @brief This is not fully-automatic. Timer interrupt will only set flag. CheckDistance must be 
-	/// @brief called for any checks to be run. Make sure CheckDistance is called as often as the 
+	/// @brief This is not fully-automatic. Timer interrupt will only set flag. CheckDistance must be
+	/// @brief called for any checks to be run. Make sure CheckDistance is called as often as the
 	/// @brief auto-check interval requires
 	/// @param intervalMillis Time between checks (ms)
 	/// @param minDistanceThreshold The distance below which the callback is called (mm)
@@ -486,7 +491,7 @@ public:
 
 		// A negative interval is measured from the start of one check to the start of the next,
 		// so the checks keep a fixed rate
-		return add_repeating_timer_ms(-static_cast<int32_t>(intervalMillis), checkDistance, this, &_autoChecker.timer);
+		return add_repeating_timer_ms(-static_cast<int32_t>(intervalMillis), handleAutoCheckTimer, this, &_autoChecker.timer);
 	}
 
 	void checkDistance()
