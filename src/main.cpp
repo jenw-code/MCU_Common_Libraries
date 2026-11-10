@@ -197,7 +197,7 @@ TOF_Laser_Range_Mini_UART<> *testLidar = nullptr;
 constexpr uint16_t LIDAR_DMA_RING_SIZE = 64;
 constexpr RP2xxx_PIO_UART_Config_t LIDAR1_UART_RX_CONFIG = {.pioIndex = 0, .stateMachine = 2, .pin = D4};
 constexpr RP2xxx_PIO_UART_Config_t LIDAR1_UART_TX_CONFIG = {.pioIndex = 0, .stateMachine = 3, .pin = D5};
-constexpr RP235x_UART_DMA_Config_t<LIDAR_DMA_RING_SIZE> LIDAR1_DMA_CONFIG = {.channel = 0};
+constexpr RP235x_UART_DMA_RX_Config_t<LIDAR_DMA_RING_SIZE> LIDAR1_DMA_CONFIG = {.channel = 0};
 
 // The DMA wraps its write address on a boundary of the ring's size, so the ring is aligned to it
 alignas(LIDAR_DMA_RING_SIZE) volatile uint8_t lidar1_DMARing[LIDAR_DMA_RING_SIZE] = {};

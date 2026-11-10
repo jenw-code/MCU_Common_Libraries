@@ -27,6 +27,7 @@ struct RP2xxx_UART_TX_t final
 	volatile uint32_t *address = nullptr;
 	const volatile uint32_t *statusAddress = nullptr;
 	uint32_t fullMask = 0; // The bit in the status that's set while the TX FIFO is full
+	uint dreq = 0;		   // Signals while the TX FIFO has space, for a DMA to pace its writes by
 	uint32_t baudRate = 0; // (bits per second)
 };
 
@@ -91,6 +92,7 @@ public:
 		tx.address = &uart_get_hw(uartInstance)->dr;
 		tx.statusAddress = &uart_get_hw(uartInstance)->fr;
 		tx.fullMask = UART_UARTFR_TXFF_BITS;
+		tx.dreq = uart_get_dreq_num(uartInstance, true);
 		tx.baudRate = static_cast<uint32_t>(baudRate);
 
 		return true;
@@ -329,6 +331,7 @@ public:
 		tx.address = &pio->txf[stateMachine];
 		tx.statusAddress = &pio->fstat;
 		tx.fullMask = static_cast<uint32_t>(1) << (PIO_FSTAT_TXFULL_LSB + stateMachine);
+		tx.dreq = pio_get_dreq(pio, stateMachine, true);
 		tx.baudRate = static_cast<uint32_t>(baudRate);
 
 		return true;
