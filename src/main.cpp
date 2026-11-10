@@ -187,16 +187,16 @@ const uint8_t MEASUREMENT_REPLY3[] = {
 BMM150_I2C bmm;
 MPU6500_I2C mpu;
 
-constexpr RP2xxx_PIO_UART_Config_t TEST_LIDAR_UART_RX_CONFIG = {.pioIndex = 0, .stateMachine = 0, .pin = D8};
-constexpr RP2xxx_PIO_UART_Config_t TEST_LIDAR_UART_TX_CONFIG = {.pioIndex = 0, .stateMachine = 1, .pin = D9};
+constexpr RP235x_PIO_UART_Config_t TEST_LIDAR_UART_RX_CONFIG = {.pioIndex = 0, .stateMachine = 0, .pin = D8};
+constexpr RP235x_PIO_UART_Config_t TEST_LIDAR_UART_TX_CONFIG = {.pioIndex = 0, .stateMachine = 1, .pin = D9};
 
 Mock_Serial *testLidarSerial = nullptr;
 TOF_Laser_Range_Mini_UART<> *testLidar = nullptr;
 
 // The lidar's DMA version: its PIO UART and DMA allocation, and the ring buffer the DMA fills
 constexpr uint16_t LIDAR_DMA_RING_SIZE = 64;
-constexpr RP2xxx_PIO_UART_Config_t LIDAR1_UART_RX_CONFIG = {.pioIndex = 0, .stateMachine = 2, .pin = D4};
-constexpr RP2xxx_PIO_UART_Config_t LIDAR1_UART_TX_CONFIG = {.pioIndex = 0, .stateMachine = 3, .pin = D5};
+constexpr RP235x_PIO_UART_Config_t LIDAR1_UART_RX_CONFIG = {.pioIndex = 0, .stateMachine = 2, .pin = D4};
+constexpr RP235x_PIO_UART_Config_t LIDAR1_UART_TX_CONFIG = {.pioIndex = 0, .stateMachine = 3, .pin = D5};
 constexpr RP235x_UART_DMA_RX_Config_t<LIDAR_DMA_RING_SIZE> LIDAR1_DMA_CONFIG = {.channel = 0};
 
 // The DMA wraps its write address on a boundary of the ring's size, so the ring is aligned to it
@@ -204,7 +204,7 @@ alignas(LIDAR_DMA_RING_SIZE) volatile uint8_t lidar1_DMARing[LIDAR_DMA_RING_SIZE
 
 RP235x_TOF_Laser_Range_Mini_UART_DMA<UART_Master::BaudRate::Baud921600, LIDAR_DMA_RING_SIZE> *lidar1 = nullptr;
 
-void lidarCallback(TOF_Laser_Range_Mini &sender, const uint32_t distance)
+void lidarCallback(TOF_Laser_Range_Mini& /* sender */, const uint32_t distance)
 {
     logValue("MIN DISTANCE CALLBACK. DISTANCE = ", distance);
 }
@@ -213,12 +213,12 @@ void lidarCallback(TOF_Laser_Range_Mini &sender, const uint32_t distance)
 /// @return True if everything was set up and the lidar responded
 bool setupLidar1()
 {
-    RP2xxx_UART_RX_t rx = {};
-    RP2xxx_UART_TX_t tx = {};
+    RP235x_UART_RX_t rx = {};
+    RP235x_UART_TX_t tx = {};
     RP235x_UART_DMA_RX_t<LIDAR_DMA_RING_SIZE> dmaRX = {};
 
-    if (RP2xxx_PIO_UART::setup_RX(LIDAR1_UART_RX_CONFIG, UART_Master::BaudRate::Baud921600, rx) &&
-        RP2xxx_PIO_UART::setup_TX(LIDAR1_UART_TX_CONFIG, UART_Master::BaudRate::Baud921600, tx) &&
+    if (RP235x_PIO_UART::setup_RX(LIDAR1_UART_RX_CONFIG, UART_Master::BaudRate::Baud921600, rx) &&
+        RP235x_PIO_UART::setup_TX(LIDAR1_UART_TX_CONFIG, UART_Master::BaudRate::Baud921600, tx) &&
         RP235x_UART_DMA::setup_RX(LIDAR1_DMA_CONFIG, rx, lidar1_DMARing, dmaRX))
     {
         lidar1 = new RP235x_TOF_Laser_Range_Mini_UART_DMA<UART_Master::BaudRate::Baud921600, LIDAR_DMA_RING_SIZE>(dmaRX, tx);
@@ -244,11 +244,11 @@ bool setupTestLidar()
     testLidarSerial->addData(0, MEASUREMENT_REPLY2);
     testLidarSerial->addData(255, MEASUREMENT_REPLY3);
 
-    RP2xxx_UART_RX_t rx = {};
-    RP2xxx_UART_TX_t tx = {};
+    RP235x_UART_RX_t rx = {};
+    RP235x_UART_TX_t tx = {};
 
-    if (RP2xxx_PIO_UART::setup_RX(TEST_LIDAR_UART_RX_CONFIG, UART_Master::BaudRate::Baud921600, rx) &&
-        RP2xxx_PIO_UART::setup_TX(TEST_LIDAR_UART_TX_CONFIG, UART_Master::BaudRate::Baud921600, tx))
+    if (RP235x_PIO_UART::setup_RX(TEST_LIDAR_UART_RX_CONFIG, UART_Master::BaudRate::Baud921600, rx) &&
+        RP235x_PIO_UART::setup_TX(TEST_LIDAR_UART_TX_CONFIG, UART_Master::BaudRate::Baud921600, tx))
     {
         testLidar = new TOF_Laser_Range_Mini_UART<>(*testLidarSerial);
         if (testLidar->begin())
