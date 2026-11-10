@@ -75,6 +75,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **One truth for data mapping.** A frame or register layout is defined once (the index constants), and code builds or reads it through those indexes, never by position.
 - **No implicit truths.** Every constant is used only for what its name says. The test: "if I change this value, is the code still predictable?"
 - **Never `while (true)`.** Put the real condition in the `while`.
+- **Where a line sits shows intent.** A line inside a loop says it may change on each pass, so anything that stays the same for the whole loop goes before it.
 - **Wrap ring indexes with increment-and-if, not modulo**, as modulo is slow on 8-bit MCUs. The exception is a compile-time constant divisor, which the compiler optimises.
 - **Initialise every struct member** (`= {}`), since C structs can hold garbage.
 - **Public functions take references, not pointers.** A function that produces a result returns `bool` and fills a reference out-parameter, changed only on success.
