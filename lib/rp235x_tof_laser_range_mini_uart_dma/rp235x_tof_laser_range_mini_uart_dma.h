@@ -4,7 +4,7 @@
 #include <hardware/dma.h>
 #include <pico/time.h>
 #include "tof_laser_range_mini.h"
-#include "rp2xxx_uart.h"
+#include "rp235x_uart.h"
 #include "rp235x_uart_dma.h"
 
 /// @brief Class for the Waveshare TOF Laser Range Sensor Mini (a Nooploop TOFSense-F2 Mini), over UART
@@ -25,7 +25,7 @@ private:
 	static_assert(calcBytesKept(F_SETTING_FRAME0_LENGTH) < DMA_BUFFER_SIZE, "The DMA buffer must be larger than the bytes kept for a NLink_TOFSense_F_Setting_Frame0");
 
 	const RP235x_UART_DMA_RX_t<DMA_BUFFER_SIZE> _dmaRX; // The DMA ring the device's data is received into
-	const RP2xxx_UART_TX_t _tx;							// The UART requests are sent to the device on
+	const RP235x_UART_TX_t _tx;							// The UART requests are sent to the device on
 	bool _started = false;
 
 	uint16_t _readIndex = 0; // Where the next byte will be read from in the DMA buffer
@@ -104,9 +104,9 @@ protected:
 
 public:
 	/// @param dmaRX The DMA ring to receive the device's data into, set up by RP235x_UART_DMA
-	/// @param tx The UART to send requests to the device on, set up by RP2xxx_PIO_UART or RP2xxx_UART
+	/// @param tx The UART to send requests to the device on, set up by RP235x_PIO_UART or RP235x_UART
 	RP235x_TOF_Laser_Range_Mini_UART_DMA(const RP235x_UART_DMA_RX_t<DMA_BUFFER_SIZE> &dmaRX,
-										 const RP2xxx_UART_TX_t &tx) : TOF_Laser_Range_Mini(static_cast<uint32_t>(BAUD_RATE)),
+										 const RP235x_UART_TX_t &tx) : TOF_Laser_Range_Mini(static_cast<uint32_t>(BAUD_RATE)),
 																	   _dmaRX(dmaRX),
 																	   _tx(tx) {}
 

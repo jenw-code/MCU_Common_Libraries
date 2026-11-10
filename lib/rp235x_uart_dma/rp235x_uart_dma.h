@@ -2,7 +2,7 @@
 
 #include <Arduino.h>
 #include <hardware/dma.h>
-#include "rp2xxx_uart.h"
+#include "rp235x_uart.h"
 
 /// @brief The DMA channel used to receive a UART, and the size of its ring buffer. The channel is held as its index,
 /// @brief so a config can be a constexpr
@@ -87,13 +87,13 @@ public:
 	/// @brief Set up a DMA that copies every byte the UART receives into a ring buffer, endlessly
 	/// @tparam BUFFER_SIZE The ring buffer's size (bytes), given by dmaConfig. A power of 2, from 2 to 32768
 	/// @param dmaConfig The DMA channel to use, and the ring buffer's size
-	/// @param uartRX The UART to receive from, set up by RP2xxx_PIO_UART or RP2xxx_UART
+	/// @param uartRX The UART to receive from, set up by RP235x_PIO_UART or RP235x_UART
 	/// @param buffer The ring buffer. It must be aligned to its own size, and stay valid while the DMA runs
 	/// @param dmaRX Receives the DMA receiver's info. Only changed if the DMA is set up
 	/// @return True if set up, false if the UART hasn't been set up, the buffer isn't aligned to its own size, or the
 	/// 		channel doesn't exist or is already claimed
 	template <uint16_t BUFFER_SIZE>
-	static bool setup_RX(const RP235x_UART_DMA_RX_Config_t<BUFFER_SIZE> &dmaConfig, const RP2xxx_UART_RX_t &uartRX,
+	static bool setup_RX(const RP235x_UART_DMA_RX_Config_t<BUFFER_SIZE> &dmaConfig, const RP235x_UART_RX_t &uartRX,
 						 volatile uint8_t (&buffer)[BUFFER_SIZE], RP235x_UART_DMA_RX_t<BUFFER_SIZE> &dmaRX)
 	{
 		static_assert((BUFFER_SIZE >= 2) && (BUFFER_SIZE <= 32768), "The DMA ring supports 2 to 32768 bytes");
@@ -141,10 +141,10 @@ public:
 	/// @brief Set up a DMA that sends bytes from a buffer out of the UART. It's left ready, not started: each send
 	/// @brief gives its own buffer and length (see RP235x_UART_DMA_TX_t)
 	/// @param dmaConfig The DMA channel to use
-	/// @param uartTX The UART to send on, set up by RP2xxx_PIO_UART or RP2xxx_UART
+	/// @param uartTX The UART to send on, set up by RP235x_PIO_UART or RP235x_UART
 	/// @param dmaTX Receives the DMA transmitter's info. Only changed if the DMA is set up
 	/// @return True if set up, false if the UART hasn't been set up, or the channel doesn't exist or is already claimed
-	static bool setup_TX(const RP235x_UART_DMA_TX_Config_t &dmaConfig, const RP2xxx_UART_TX_t &uartTX,
+	static bool setup_TX(const RP235x_UART_DMA_TX_Config_t &dmaConfig, const RP235x_UART_TX_t &uartTX,
 						 RP235x_UART_DMA_TX_t &dmaTX)
 	{
 		if (uartTX.address == nullptr)

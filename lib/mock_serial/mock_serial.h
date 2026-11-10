@@ -51,7 +51,7 @@ public:
     /// @brief Start the data arriving. Only the first call starts it, as a real device sends regardless of the
     /// @brief port restarting
     /// @param baudRate Ignored, as there's no real port
-    void begin(unsigned long baudRate) override
+    void begin(unsigned long /* baudRate */) override
     {
         start();
     }
@@ -60,7 +60,7 @@ public:
     /// @brief port restarting
     /// @param baudRate Ignored, as there's no real port
     /// @param config Ignored, as there's no real port
-    void begin(unsigned long baudRate, uint16_t config) override
+    void begin(unsigned long /* baudRate */, uint16_t /* config */) override
     {
         start();
     }

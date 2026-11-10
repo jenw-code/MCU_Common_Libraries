@@ -9,20 +9,20 @@
 
 /// @brief One direction of a hardware UART: the UART it uses, and its pin. The UART is held as its index, not as a
 /// @brief uart_inst_t pointer, so a config can be a constexpr (the pointer comes from a cast that isn't allowed in one)
-struct RP2xxx_UART_Config_t final
+struct RP235x_UART_Config_t final
 {
 	uint8_t uartIndex = 0; // 0 to NUM_UARTS - 1
 	uint8_t pin = 0;	   // The GPIO the UART receives or sends on. It must be one of that UART's pins
 };
 
-struct RP2xxx_UART_RX_t final
+struct RP235x_UART_RX_t final
 {
 	const volatile void *address = nullptr;
 	uint dreq = 0;
 	uint32_t baudRate = 0; // (bits per second)
 };
 
-struct RP2xxx_UART_TX_t final
+struct RP235x_UART_TX_t final
 {
 	volatile uint32_t *address = nullptr;
 	const volatile uint32_t *statusAddress = nullptr;
@@ -33,12 +33,12 @@ struct RP2xxx_UART_TX_t final
 
 /// @brief Helper that receives and sends UART (8N1) using a hardware UART. It can't also be used through Serial1 or Serial2
 /// @brief Its RX FIFO is only 32 bytes, so the bytes received must be read as they arrive, e.g. by a DMA
-class RP2xxx_UART final
+class RP235x_UART final
 {
 private:
 	/// @brief Tear down one direction of a hardware UART: stop the UART, and return its pin to GPIO
 	/// @param config The UART and its pin, as given to setup_RX or setup_TX
-	static void teardownUART(const RP2xxx_UART_Config_t &config)
+	static void teardownUART(const RP235x_UART_Config_t &config)
 	{
 		uart_deinit(uart_get_instance(config.uartIndex));
 		gpio_deinit(config.pin);
@@ -46,14 +46,14 @@ private:
 
 public:
 	// A utility, so it's never instantiated
-	RP2xxx_UART() = delete;
+	RP235x_UART() = delete;
 
 	/// @brief Set up a hardware UART that receives
 	/// @param rxConfig The UART to receive with, and the pin to receive on. The pin must be one of the UART's RX pins
 	/// @param baudRate The baud rate
 	/// @param rx Receives the UART's RX info. Only changed if the UART is set up
 	/// @return True if set up,false if the UART doesn't exist
-	static bool setup_RX(const RP2xxx_UART_Config_t &rxConfig, const UART_Master::BaudRate baudRate, RP2xxx_UART_RX_t &rx)
+	static bool setup_RX(const RP235x_UART_Config_t &rxConfig, const UART_Master::BaudRate baudRate, RP235x_UART_RX_t &rx)
 	{
 		if (rxConfig.uartIndex >= NUM_UARTS)
 			return false;
@@ -77,7 +77,7 @@ public:
 	/// @param baudRate The baud rate
 	/// @param tx Receives the UART's TX info. Only changed if the UART is set up
 	/// @return True if set up,false if the UART doesn't exist
-	static bool setup_TX(const RP2xxx_UART_Config_t &txConfig, const UART_Master::BaudRate baudRate, RP2xxx_UART_TX_t &tx)
+	static bool setup_TX(const RP235x_UART_Config_t &txConfig, const UART_Master::BaudRate baudRate, RP235x_UART_TX_t &tx)
 	{
 		if (txConfig.uartIndex >= NUM_UARTS)
 			return false;
@@ -100,14 +100,14 @@ public:
 
 	/// @brief Tear down a hardware UART that receives
 	/// @param rxConfig The config given to setup_RX
-	static void teardown_RX(const RP2xxx_UART_Config_t &rxConfig)
+	static void teardown_RX(const RP235x_UART_Config_t &rxConfig)
 	{
 		teardownUART(rxConfig);
 	}
 
 	/// @brief Tear down a hardware UART that sends
 	/// @param txConfig The config given to setup_TX
-	static void teardown_TX(const RP2xxx_UART_Config_t &txConfig)
+	static void teardown_TX(const RP235x_UART_Config_t &txConfig)
 	{
 		teardownUART(txConfig);
 	}
@@ -117,7 +117,7 @@ public:
 
 /// @brief One direction of a PIO UART: the state machine it uses, and its pin. The PIO is held as its index, not as a
 /// @brief PIO pointer, so a config can be a constexpr (the pointer comes from a cast that isn't allowed in one)
-struct RP2xxx_PIO_UART_Config_t final
+struct RP235x_PIO_UART_Config_t final
 {
 	uint8_t pioIndex = 0;	  // 0 to NUM_PIOS - 1
 	uint8_t stateMachine = 0; // 0 to NUM_PIO_STATE_MACHINES - 1
@@ -126,7 +126,7 @@ struct RP2xxx_PIO_UART_Config_t final
 
 /// @brief Helper that receives and sends UART (8N1) on any GPIOs using a PIO
 /// @brief It has no RX buffer, so the bytes received must be read as they arrive, e.g. by a DMA
-class RP2xxx_PIO_UART final
+class RP235x_PIO_UART final
 {
 private:
 	// Where a program has been loaded into a PIO's instruction memory
@@ -159,6 +159,7 @@ private:
 		.length = RX_LENGTH,
 		.origin = -1, // Can be loaded anywhere in the PIO's instruction memory
 		.pio_version = 0,
+		.used_gpio_ranges = 0, // The program only uses pins relative to its pin settings
 	};
 
 	// PIO transmitter: pico-examples uart_tx (uart_tx.pio, Copyright (c) 2020 Raspberry Pi (Trading) Ltd.,
@@ -182,6 +183,7 @@ private:
 		.length = TX_LENGTH,
 		.origin = -1, // Can be loaded anywhere in the PIO's instruction memory
 		.pio_version = 0,
+		.used_gpio_ranges = 0, // The program only uses pins relative to its pin settings
 	};
 
 	// Each program is loaded once per PIO, and shared by every state machine in it that uses the program
@@ -213,7 +215,7 @@ private:
 	/// @param offset Receives where the program is in the state machine's PIO
 	/// @return True if set up,false if the state machine doesn't exist or is already claimed, the pin is outside
 	/// 		its PIO's 32 pin window, or the PIO has no room for the program
-	static bool setupStateMachine(const RP2xxx_PIO_UART_Config_t &config, const pio_program_t &program,
+	static bool setupStateMachine(const RP235x_PIO_UART_Config_t &config, const pio_program_t &program,
 								   LoadedProgram (&loadedPrograms)[NUM_PIOS], uint &offset)
 	{
 		if ((config.pioIndex >= NUM_PIOS) || (config.stateMachine >= NUM_PIO_STATE_MACHINES))
@@ -241,7 +243,7 @@ private:
 
 	/// @brief Tear down a state machine set up by setupStateMachine: stop it, unclaim it, and return its pin to GPIO
 	/// @param config The state machine and its pin, as given to setupStateMachine
-	static void teardownStateMachine(const RP2xxx_PIO_UART_Config_t &config)
+	static void teardownStateMachine(const RP235x_PIO_UART_Config_t &config)
 	{
 		const PIO pio = pio_get_instance(config.pioIndex);
 		pio_sm_set_enabled(pio, config.stateMachine, false);
@@ -251,7 +253,7 @@ private:
 
 public:
 	// A utility, so it's never instantiated
-	RP2xxx_PIO_UART() = delete;
+	RP235x_PIO_UART() = delete;
 
 	/// @brief Set up a PIO UART that receives
 	/// @param rxConfig The state machine to receive with, and the pin to receive on. Its PIO's GPIO base must already
@@ -259,7 +261,7 @@ public:
 	/// @param baudRate The baud rate
 	/// @param rx Receives the UART's RX info. Only changed if the UART is set up
 	/// @return True if set up,false if the state machine can't be set up (see setupStateMachine)
-	static bool setup_RX(const RP2xxx_PIO_UART_Config_t &rxConfig, const UART_Master::BaudRate baudRate, RP2xxx_UART_RX_t &rx)
+	static bool setup_RX(const RP235x_PIO_UART_Config_t &rxConfig, const UART_Master::BaudRate baudRate, RP235x_UART_RX_t &rx)
 	{
 		uint offset;
 		if (!setupStateMachine(rxConfig, RX_PROGRAM, _rxPrograms, offset))
@@ -298,7 +300,7 @@ public:
 	/// @param baudRate The baud rate
 	/// @param tx Receives the UART's TX info. Only changed if the UART is set up
 	/// @return True if set up,false if the state machine can't be set up (see setupStateMachine)
-	static bool setup_TX(const RP2xxx_PIO_UART_Config_t &txConfig, const UART_Master::BaudRate baudRate, RP2xxx_UART_TX_t &tx)
+	static bool setup_TX(const RP235x_PIO_UART_Config_t &txConfig, const UART_Master::BaudRate baudRate, RP235x_UART_TX_t &tx)
 	{
 		uint offset;
 		if (!setupStateMachine(txConfig, TX_PROGRAM, _txPrograms, offset))
@@ -339,14 +341,14 @@ public:
 
 	/// @brief Tear down a PIO UART that receives, tearing down its state machine
 	/// @param rxConfig The config given to setup_RX
-	static void teardown_RX(const RP2xxx_PIO_UART_Config_t &rxConfig)
+	static void teardown_RX(const RP235x_PIO_UART_Config_t &rxConfig)
 	{
 		teardownStateMachine(rxConfig);
 	}
 
 	/// @brief Tear down a PIO UART that sends, tearing down its state machine
 	/// @param txConfig The config given to setup_TX
-	static void teardown_TX(const RP2xxx_PIO_UART_Config_t &txConfig)
+	static void teardown_TX(const RP235x_PIO_UART_Config_t &txConfig)
 	{
 		teardownStateMachine(txConfig);
 	}

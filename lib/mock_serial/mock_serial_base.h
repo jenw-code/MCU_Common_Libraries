@@ -7,9 +7,7 @@
 /// @brief previous one arrived (or after start() for the first), as a real device's data does
 class Mock_Serial_Base
 {
-private:
-	static constexpr uint8_t MAX_DATA_ARRAYS = 16;
-
+protected:
 	// No default member initializers, as they can't be used inside the enclosing class. Only used in an array
 	// initialised with = {}, which zeroes every element
 	struct DataArray final
@@ -18,6 +16,9 @@ private:
 		const uint8_t *data;
 		size_t length;
 	};
+
+private:
+	static constexpr uint8_t MAX_DATA_ARRAYS = 16;
 
 	DataArray _dataArrays[MAX_DATA_ARRAYS] = {};
 	uint8_t _dataArrayCount = 0;
@@ -40,9 +41,24 @@ protected:
 		}
 	}
 
-	/// @brief Calculate how many bytes have arrived so far, across every data array
-	/// @return Number of bytes arrived. 0 before start()
-	size_t calcBytesArrived() const
+	/// @brief Get how many data arrays have been added
+	/// @return Number of data arrays
+	uint8_t getArrayCount() const
+	{
+		return _dataArrayCount;
+	}
+
+	/// @brief Get a data array
+	/// @param index The data array's position, in the order added. Must be less than getArrayCount()
+	/// @return The data array
+	const DataArray &getArray(const uint8_t index) const
+	{
+		return _dataArrays[index];
+	}
+
+	/// @brief Calculate how many data arrays have arrived so far
+	/// @return Number of data arrays arrived. 0 before start()
+	uint8_t calcArraysArrived() const
 	{
 		if (!_started)
 			return 0;
@@ -50,17 +66,29 @@ protected:
 		const uint32_t elapsedMillis = millis() - _startMillis;
 
 		uint32_t arrivalMillis = 0;
-		size_t bytesArrived = 0;
+		uint8_t arraysArrived = 0;
 		for (uint8_t index = 0; index < _dataArrayCount; ++index)
 		{
-			const DataArray &array = _dataArrays[index];
-			arrivalMillis += array.pauseMillis;
+			arrivalMillis += _dataArrays[index].pauseMillis;
 
 			if (elapsedMillis < arrivalMillis)
 				break;
 
-			bytesArrived += array.length;
+			++arraysArrived;
 		}
+
+		return arraysArrived;
+	}
+
+	/// @brief Calculate how many bytes have arrived so far, across every data array
+	/// @return Number of bytes arrived. 0 before start()
+	size_t calcBytesArrived() const
+	{
+		const uint8_t arraysArrived = calcArraysArrived();
+
+		size_t bytesArrived = 0;
+		for (uint8_t index = 0; index < arraysArrived; ++index)
+			bytesArrived += _dataArrays[index].length;
 
 		return bytesArrived;
 	}
