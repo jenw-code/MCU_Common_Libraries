@@ -464,7 +464,7 @@ public:
 	/// @brief TODO: not yet implemented, so this always returns false and the mode stays Continuous
 	/// @param mode The output mode
 	/// @return True if the mode was set
-	bool virtual setOutputMode(const OutputMode mode)
+	bool virtual setOutputMode(const OutputMode /* mode */)
 	{
 		// TODO: write the output mode to the device (bit1 of the settings frame's mode byte, by read-modify-write) once
 		// the hardware has confirmed the mode byte's layout. Until then, the mode can't be changed
