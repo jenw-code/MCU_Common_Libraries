@@ -632,7 +632,7 @@ private:
 	static constexpr uint16_t WOM_THRESHOLD_MAX_MG = 1020; // Wake-on-motion threshold maximum
 
 	static constexpr uint8_t DATA_REGISTER = REG_ACCEL_XOUT_H;						 // First data register (accel X high byte)
-	static constexpr uint8_t DATA_LENGTH = (REG_GYRO_ZOUT_L - REG_ACCEL_XOUT_H) + 1; // Number of data registers (accel X to gyro Z)
+	static constexpr uint8_t DATA_SIZE = (REG_GYRO_ZOUT_L - REG_ACCEL_XOUT_H) + 1; // Number of data registers (accel X to gyro Z)
 
 	// Data scaling. Fixed point factors avoid a division for every sample
 	static constexpr uint16_t MG_PER_G = 1000;			   // Accel is scaled from g to mg
@@ -648,7 +648,7 @@ private:
 	static constexpr uint16_t TEMPERATURE_FACTOR = 767;	   // 333.87 LSB/°C (1000 x 256 / 333.87)
 	static constexpr uint16_t TEMPERATURE_OFFSET = 21000;  // Room temperature offset (21 °C in m°C)
 
-	static constexpr uint8_t EXT_SENS_DATA_COUNT = 24; // Number of EXT_SENS_DATA registers (00 to 23)
+	static constexpr uint8_t EXT_SENS_DATA_SIZE = 24; // Number of EXT_SENS_DATA registers (00 to 23)
 
 	static constexpr uint16_t SLAVE4_TRANSFER_TIMEOUT_MILLIS = 300; // Slave 4 transfers happen at the sample rate (slowest 1 kHz / 256 = 3.9 Hz)
 
@@ -845,7 +845,7 @@ private:
 	bool transferSlave4(const uint8_t addr, const uint8_t reg, const uint8_t data, const bool registerDisabled);
 
 	/// @brief Parse raw data from the data register bytes
-	/// @param data Bytes read from DATA_REGISTER onwards (DATA_LENGTH bytes)
+	/// @param data Bytes read from DATA_REGISTER onwards (DATA_SIZE bytes)
 	/// @param raw Raw accel, temperature and gyro data
 	void parseRawData(const uint8_t *const data, RawSensorData &raw) const;
 
@@ -856,10 +856,10 @@ private:
 
 	/// @brief Parse scaled data from the data register bytes
 	/// @param data Bytes read from DATA_REGISTER onwards
-	/// @param length Number of bytes in data (must be DATA_LENGTH)
+	/// @param size Number of bytes in data (must be DATA_SIZE)
 	/// @param result Accel (mg), temperature (m°C) and gyro (mdps)
 	/// @return True if successful
-	bool parseData(const uint8_t *const data, const uint8_t length, SensorData &result) const;
+	bool parseData(const uint8_t *const data, const uint8_t size, SensorData &result) const;
 
 	/// @brief Read the average of SELF_TEST_SAMPLE_COUNT samples
 	/// @param average Average raw data of the samples
@@ -1348,21 +1348,21 @@ public:
 	/// @tparam SLAVE The slave to use (Slave0 to Slave3)
 	/// @param address I2C address of the aux device
 	/// @param reg Register to start reading from
-	/// @param length Number of bytes to read (1 to 15)
+	/// @param size Number of bytes to read (1 to 15)
 	/// @param swapBytes True = swap the bytes of each word
 	/// @param groupOdd True = registers 1 and 2 grouped (even register ends a group), false = registers 0 and 1 grouped
 	/// @param registerDisabled True = transfer data only, without writing the register address
 	/// @return True if successful
 	template <AuxSlave SLAVE>
-	bool setSlaveRead(const uint8_t address, const uint8_t reg, const uint8_t length, const bool swapBytes = false, const bool groupOdd = false, const bool registerDisabled = false)
+	bool setSlaveRead(const uint8_t address, const uint8_t reg, const uint8_t size, const bool swapBytes = false, const bool groupOdd = false, const bool registerDisabled = false)
 	{
 		static_assert(SLAVE != AuxSlave::Slave4, "Slave 4 only supports single transfers - use readSlave4()");
 		constexpr SlaveRegisters REGISTERS = getSlaveRegisters<SLAVE>();
 
-		if ((length == 0) || (length > REGISTERS.ctrlBitsLeng))
+		if ((size == 0) || (size > REGISTERS.ctrlBitsLeng))
 			return false;
 
-		uint8_t ctrl = REGISTERS.ctrlBitEn | (length & REGISTERS.ctrlBitsLeng); // I2C_SLVx_EN - set to 1, I2C_SLVx_LENG - set to length
+		uint8_t ctrl = REGISTERS.ctrlBitEn | (size & REGISTERS.ctrlBitsLeng); // I2C_SLVx_EN - set to 1, I2C_SLVx_LENG - set to size
 		if (swapBytes)
 			ctrl |= REGISTERS.ctrlBitByteSw; // I2C_SLVx_BYTE_SW - set to 1 (swap bytes)
 		if (groupOdd)
@@ -1472,9 +1472,9 @@ public:
 	/// @brief Read the data stored by slaves 0 to 3
 	/// @param data Buffer for the data
 	/// @param index First EXT_SENS_DATA register to read (0 to 23)
-	/// @param length Number of bytes to read (1 to 24 - index)
+	/// @param size Number of bytes to read (1 to 24 - index)
 	/// @return True if successful
-	bool readExternalSensorData(uint8_t *const data, const uint8_t index, const uint8_t length) const;
+	bool readExternalSensorData(uint8_t *const data, const uint8_t index, const uint8_t size) const;
 
 	/// @brief Write a single byte to an aux I2C device using slave 4
 	/// @param address I2C address of the aux device
@@ -1544,9 +1544,9 @@ public:
 
 	/// @brief Read bytes from the FIFO
 	/// @param data Buffer for the data
-	/// @param length Number of bytes to read (1 to FIFO_SIZE)
+	/// @param size Number of bytes to read (1 to FIFO_SIZE)
 	/// @return True if successful
-	bool readFifo(uint8_t *const data, const uint16_t length) const;
+	bool readFifo(uint8_t *const data, const uint16_t size) const;
 
 	/// @brief Reset all registers to their default values. The device is left awake
 	/// @return True if successful

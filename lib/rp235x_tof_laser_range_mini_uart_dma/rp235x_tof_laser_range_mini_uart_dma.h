@@ -21,8 +21,8 @@ class RP235x_TOF_Laser_Range_Mini_UART_DMA final : public TOF_Laser_Range_Mini
 private:
 	// readFrame keeps the latest bytes it needs for a frame, and the ring must still hold them. A full ring's
 	// read and write positions are the same, so it would read as empty: the ring must be larger than the bytes kept
-	static_assert(calcBytesKept(FRAME0_LENGTH) < DMA_BUFFER_SIZE, "The DMA buffer must be larger than the bytes kept for a NLink_TOFSense_Frame0");
-	static_assert(calcBytesKept(F_SETTING_FRAME0_LENGTH) < DMA_BUFFER_SIZE, "The DMA buffer must be larger than the bytes kept for a NLink_TOFSense_F_Setting_Frame0");
+	static_assert(calcBytesKept(FRAME0_SIZE) < DMA_BUFFER_SIZE, "The DMA buffer must be larger than the bytes kept for a NLink_TOFSense_Frame0");
+	static_assert(calcBytesKept(F_SETTING_FRAME0_SIZE) < DMA_BUFFER_SIZE, "The DMA buffer must be larger than the bytes kept for a NLink_TOFSense_F_Setting_Frame0");
 
 	const RP235x_UART_DMA_RX_t<DMA_BUFFER_SIZE> _dmaRX; // The DMA ring the device's data is received into
 	const RP235x_UART_TX_t _tx;							// The UART requests are sent to the device on
@@ -43,11 +43,11 @@ private:
 protected:
 	/// @brief Write bytes to the device, waiting whenever the TX FIFO is full
 	/// @param bytes The bytes to write
-	/// @param byteCount Number of bytes
+	/// @param size Number of bytes
 	/// @return Always true: every byte is written once the TX FIFO has space
-	bool writeBytes(const uint8_t *const bytes, const size_t byteCount) override
+	bool writeBytes(const uint8_t *const bytes, const size_t size) override
 	{
-		for (size_t index = 0; index < byteCount; ++index)
+		for (size_t index = 0; index < size; ++index)
 		{
 			while ((*_tx.statusAddress & _tx.fullMask) != 0)
 			{
@@ -80,10 +80,10 @@ protected:
 
 	/// @brief Discard all but the latest received bytes, so the next byte read is the oldest one kept. The DMA
 	/// @brief overwrites the oldest bytes as it wraps, so the bytes kept are counted back from where it will write next
-	/// @param keepCount Number of the latest bytes to keep, less than the DMA buffer's size
-	void discardBytes(const size_t keepCount) override
+	/// @param sizeToKeep Number of the latest bytes to keep, less than the DMA buffer's size
+	void discardBytes(const size_t sizeToKeep) override
 	{
-		_readIndex = (readDMABufferWriteIndex() + DMA_BUFFER_SIZE - keepCount) % DMA_BUFFER_SIZE;
+		_readIndex = (readDMABufferWriteIndex() + DMA_BUFFER_SIZE - sizeToKeep) % DMA_BUFFER_SIZE;
 	}
 
 	/// @brief Check the setup, and confirm the device responds

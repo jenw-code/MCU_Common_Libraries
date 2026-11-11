@@ -14,7 +14,7 @@ protected:
 	{
 		uint32_t pauseMillis;
 		const uint8_t *data;
-		size_t length;
+		size_t size;
 	};
 
 private:
@@ -88,32 +88,32 @@ protected:
 
 		size_t bytesArrived = 0;
 		for (uint8_t index = 0; index < arraysArrived; ++index)
-			bytesArrived += _dataArrays[index].length;
+			bytesArrived += _dataArrays[index].size;
 
 		return bytesArrived;
 	}
 
 	/// @brief Calculate how many bytes the data holds, across every data array
 	/// @return Number of bytes
-	size_t calcDataLength() const
+	size_t calcDataSize() const
 	{
-		size_t dataLength = 0;
+		size_t dataSize = 0;
 		for (uint8_t index = 0; index < _dataArrayCount; ++index)
-			dataLength += _dataArrays[index].length;
+			dataSize += _dataArrays[index].size;
 
-		return dataLength;
+		return dataSize;
 	}
 
 	/// @brief Get a byte of the data, counting across every data array, e.g. position 0 is the first data array's
 	/// @brief first byte
-	/// @param position The byte's position in the data. Must be less than calcDataLength()
+	/// @param position The byte's position in the data. Must be less than calcDataSize()
 	/// @return The byte
 	uint8_t getByte(size_t position) const
 	{
 		uint8_t index = 0;
-		while (position >= _dataArrays[index].length)
+		while (position >= _dataArrays[index].size)
 		{
-			position -= _dataArrays[index].length;
+			position -= _dataArrays[index].size;
 			++index;
 		}
 
@@ -122,17 +122,17 @@ protected:
 
 public:
 	/// @brief Add a data array to the end of the data
-	/// @tparam LENGTH The array's length (bytes)
+	/// @tparam SIZE The array's size (bytes)
 	/// @param pauseMillis The pause before the array arrives, after the previous one arrived (ms)
 	/// @param data The bytes that arrive. Must stay valid while the mock is used
 	/// @return True if added, false if MAX_DATA_ARRAYS have already been added
-	template <size_t LENGTH>
-	bool addData(const uint32_t pauseMillis, const uint8_t (&data)[LENGTH])
+	template <size_t SIZE>
+	bool addData(const uint32_t pauseMillis, const uint8_t (&data)[SIZE])
 	{
 		if (_dataArrayCount >= MAX_DATA_ARRAYS)
 			return false;
 
-		_dataArrays[_dataArrayCount] = {.pauseMillis = pauseMillis, .data = data, .length = LENGTH};
+		_dataArrays[_dataArrayCount] = {.pauseMillis = pauseMillis, .data = data, .size = SIZE};
 		++_dataArrayCount;
 		return true;
 	}

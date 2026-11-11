@@ -65,8 +65,8 @@ protected:
 	static constexpr uint8_t FRAME0_SIGNAL_STRENGTH_INDEX = 12; // signal_strength (uint16, little-endian, 2 bytes)
 	static constexpr uint8_t FRAME0_RANGE_PRECISION_INDEX = 14; // range_precision (uint8)
 	static constexpr uint8_t FRAME0_SUM_CHECK_INDEX = 15;		// Sum Check (uint8)
-	static constexpr uint8_t FRAME0_LENGTH = 16;				// Frame length (bytes)
-	static_assert(FRAME0_SUM_CHECK_INDEX < FRAME0_LENGTH, "The Sum Check must be inside the frame");
+	static constexpr uint8_t FRAME0_SIZE = 16;				// Frame size (bytes)
+	static_assert(FRAME0_SUM_CHECK_INDEX < FRAME0_SIZE, "The Sum Check must be inside the frame");
 
 	// Each version's readFrame relies on the Frame Header coming first, followed by the Function Mark
 	static_assert(FRAME0_FRAME_HEADER_INDEX == 0, "The Frame Header must be the frame's first byte");
@@ -79,8 +79,8 @@ protected:
 	static constexpr uint8_t READ_FRAME0_ID_INDEX = 4;			  // id (uint8)
 	static constexpr uint8_t READ_FRAME0_RESERVED_2_INDEX = 5;	  // reserved (uint16, 2 bytes)
 	static constexpr uint8_t READ_FRAME0_SUM_CHECK_INDEX = 7;	  // Sum Check (uint8)
-	static constexpr uint8_t READ_FRAME0_LENGTH = 8;			  // Frame length (bytes)
-	static_assert(READ_FRAME0_SUM_CHECK_INDEX < READ_FRAME0_LENGTH, "The Sum Check must be inside the frame");
+	static constexpr uint8_t READ_FRAME0_SIZE = 8;			  // Frame size (bytes)
+	static_assert(READ_FRAME0_SUM_CHECK_INDEX < READ_FRAME0_SIZE, "The Sum Check must be inside the frame");
 
 	// NLink_TOFSense_F_Setting_Frame0: settings frame, sent to the device to write or read its settings, and sent
 	// back by the device in reply to a read
@@ -101,8 +101,8 @@ protected:
 	static constexpr uint8_t F_SETTING_FRAME0_FILTER_FACTOR_INDEX = 26; // filter factor (uint8)
 	static constexpr uint8_t F_SETTING_FRAME0_RESERVED_5_INDEX = 27;	// reserved (4 bytes)
 	static constexpr uint8_t F_SETTING_FRAME0_SUM_CHECK_INDEX = 31;		// Sum Check (uint8)
-	static constexpr uint8_t F_SETTING_FRAME0_LENGTH = 32;				// Frame length (bytes)
-	static_assert(F_SETTING_FRAME0_SUM_CHECK_INDEX < F_SETTING_FRAME0_LENGTH, "The Sum Check must be inside the frame");
+	static constexpr uint8_t F_SETTING_FRAME0_SIZE = 32;				// Frame size (bytes)
+	static_assert(F_SETTING_FRAME0_SUM_CHECK_INDEX < F_SETTING_FRAME0_SIZE, "The Sum Check must be inside the frame");
 
 	// Each version's readFrame relies on the Frame Header coming first, followed by the Function Mark
 	static_assert(F_SETTING_FRAME0_FRAME_HEADER_INDEX == 0, "The Frame Header must be the frame's first byte");
@@ -126,13 +126,13 @@ protected:
 
 	/// @brief Calculate a frame's Sum Check, from every byte of the frame except the Sum Check itself
 	/// @param frame The frame
-	/// @param length The frame's length (bytes)
+	/// @param size The frame's size (bytes)
 	/// @param sumCheckIndex The index of the frame's Sum Check
 	/// @return The Sum Check
-	static uint8_t calcSumCheck(const uint8_t *const frame, const uint8_t length, const uint8_t sumCheckIndex)
+	static uint8_t calcSumCheck(const uint8_t *const frame, const uint8_t size, const uint8_t sumCheckIndex)
 	{
 		uint32_t sum = 0;
-		for (uint8_t index = 0; index < length; ++index)
+		for (uint8_t index = 0; index < size; ++index)
 		{
 			if (index != sumCheckIndex)
 				sum += frame[index];
@@ -143,30 +143,30 @@ protected:
 	}
 
 	/// @brief Calculate the time to transmit bytes over the UART, e.g. 32 bytes at 921600 baud gives 347 µs
-	/// @param byteCount Number of bytes
+	/// @param size Number of bytes
 	/// @param baudRate The UART's baud rate (bits per second)
 	/// @return The time (µs)
-	static constexpr uint32_t calcTransmitMicros(const uint8_t byteCount, const uint32_t baudRate)
+	static constexpr uint32_t calcTransmitMicros(const uint8_t size, const uint32_t baudRate)
 	{
 		constexpr uint32_t BITS_PER_UART_BYTE = 10; // Start bit, 8 data bits and stop bit
 		constexpr uint32_t MICROS_PER_SECOND = 1000000;
 
-		return (static_cast<uint32_t>(byteCount) * BITS_PER_UART_BYTE * MICROS_PER_SECOND) / baudRate;
+		return (static_cast<uint32_t>(size) * BITS_PER_UART_BYTE * MICROS_PER_SECOND) / baudRate;
 	}
 
 	/// @brief Parse a little-endian field from a frame
 	/// @tparam T The field's type
 	/// @param frame The frame
 	/// @param fieldIndex The field's index within the frame
-	/// @param byteCount The field's size in the frame (bytes), up to the size of T. Defaults to the size of T
+	/// @param size The field's size in the frame (bytes), up to the size of T. Defaults to the size of T
 	/// @return The field's value
 	template <typename T>
-	static T parseField(const uint8_t *const frame, const uint8_t fieldIndex, const uint8_t byteCount = sizeof(T))
+	static T parseField(const uint8_t *const frame, const uint8_t fieldIndex, const uint8_t size = sizeof(T))
 	{
 		constexpr uint8_t BITS_PER_BYTE = 8;
 
 		T value = 0;
-		for (uint8_t byteIndex = 0; byteIndex < byteCount; ++byteIndex)
+		for (uint8_t byteIndex = 0; byteIndex < size; ++byteIndex)
 			value |= static_cast<T>(static_cast<T>(frame[fieldIndex + byteIndex]) << (BITS_PER_BYTE * byteIndex));
 
 		return value;
@@ -174,7 +174,7 @@ protected:
 
 	/// @brief Populate a request to read the device's settings, as an NLink_TOFSense_F_Setting_Frame0
 	/// @param request Receives the request
-	static void populateSettingsRequest(uint8_t (&request)[F_SETTING_FRAME0_LENGTH])
+	static void populateSettingsRequest(uint8_t (&request)[F_SETTING_FRAME0_SIZE])
 	{
 		// HARDWARE CHECK NEEDED: the manual only shows a settings write, so this read request is unconfirmed.
 		// Check the device replies to it.
@@ -184,33 +184,33 @@ protected:
 
 		// Set all values to the "not set" value.
 		// We'll then assign the values needed to request the settings.
-		memset(request, NOT_SET_VALUE, F_SETTING_FRAME0_LENGTH);
+		memset(request, NOT_SET_VALUE, F_SETTING_FRAME0_SIZE);
 
 		request[F_SETTING_FRAME0_FRAME_HEADER_INDEX] = F_SETTING_FRAME0_FRAME_HEADER;
 		request[F_SETTING_FRAME0_FUNCTION_MARK_INDEX] = F_SETTING_FRAME0_FUNCTION_MARK;
 		request[F_SETTING_FRAME0_MIX_INDEX] = MIX_READ;
 		request[F_SETTING_FRAME0_ID_INDEX] = FACTORY_ID;
-		request[F_SETTING_FRAME0_SUM_CHECK_INDEX] = calcSumCheck(request, F_SETTING_FRAME0_LENGTH, F_SETTING_FRAME0_SUM_CHECK_INDEX);
+		request[F_SETTING_FRAME0_SUM_CHECK_INDEX] = calcSumCheck(request, F_SETTING_FRAME0_SIZE, F_SETTING_FRAME0_SUM_CHECK_INDEX);
 	}
 
 	/// @brief Populate a request for one measurement, as an NLink_TOFSense_Read_Frame0
 	/// @param request Receives the request
-	static void populateMeasurementRequest(uint8_t (&request)[READ_FRAME0_LENGTH])
+	static void populateMeasurementRequest(uint8_t (&request)[READ_FRAME0_SIZE])
 	{
 		// Set all values to the reserved value.
 		// We'll then assign the values needed to request a measurement.
-		memset(request, RESERVED_VALUE, READ_FRAME0_LENGTH);
+		memset(request, RESERVED_VALUE, READ_FRAME0_SIZE);
 
 		request[READ_FRAME0_FRAME_HEADER_INDEX] = FRAME_HEADER;
 		request[READ_FRAME0_FUNCTION_MARK_INDEX] = READ_FRAME0_FUNCTION_MARK;
 		request[READ_FRAME0_ID_INDEX] = FACTORY_ID;
-		request[READ_FRAME0_SUM_CHECK_INDEX] = calcSumCheck(request, READ_FRAME0_LENGTH, READ_FRAME0_SUM_CHECK_INDEX);
+		request[READ_FRAME0_SUM_CHECK_INDEX] = calcSumCheck(request, READ_FRAME0_SIZE, READ_FRAME0_SUM_CHECK_INDEX);
 	}
 
 	/// @brief Parse the measurement from a valid NLink_TOFSense_Frame0
 	/// @param frame The frame
 	/// @return The measurement
-	static Measurement parseMeasurement(const uint8_t (&frame)[FRAME0_LENGTH])
+	static Measurement parseMeasurement(const uint8_t (&frame)[FRAME0_SIZE])
 	{
 		Measurement measurement;
 		measurement.id = parseField<uint8_t>(frame, FRAME0_ID_INDEX);
@@ -226,7 +226,7 @@ protected:
 	/// @brief Parse the settings from a valid NLink_TOFSense_F_Setting_Frame0
 	/// @param frame The frame
 	/// @return The settings
-	static Settings parseSettings(const uint8_t (&frame)[F_SETTING_FRAME0_LENGTH])
+	static Settings parseSettings(const uint8_t (&frame)[F_SETTING_FRAME0_SIZE])
 	{
 		Settings settings;
 		settings.id = parseField<uint8_t>(frame, F_SETTING_FRAME0_ID_INDEX);
@@ -258,9 +258,9 @@ protected:
 
 	/// @brief Write bytes to the device
 	/// @param bytes The bytes to write
-	/// @param byteCount Number of bytes
+	/// @param size Number of bytes
 	/// @return True if every byte was written
-	virtual bool writeBytes(const uint8_t *const bytes, const size_t byteCount) = 0;
+	virtual bool writeBytes(const uint8_t *const bytes, const size_t size) = 0;
 
 	/// @brief Get how many received bytes are waiting to be read
 	/// @return Number of bytes waiting
@@ -272,40 +272,40 @@ protected:
 	virtual uint8_t readByte() = 0;
 
 	/// @brief Discard all but the latest received bytes, so the next byte read is the oldest one kept
-	/// @param keepCount Number of the latest bytes to keep
-	virtual void discardBytes(const size_t keepCount) = 0;
+	/// @param sizeToKeep Number of the latest bytes to keep
+	virtual void discardBytes(const size_t sizeToKeep) = 0;
 
 	/// @brief Calculate how many of the latest received bytes readFrame keeps, e.g. a 16 byte frame gives 31 bytes
-	/// @param frameLength The frame's length (bytes)
+	/// @param frameSize The frame's size (bytes)
 	/// @return Number of bytes kept
-	static constexpr size_t calcBytesKept(const uint8_t frameLength)
+	static constexpr size_t calcBytesKept(const uint8_t frameSize)
 	{
 		// Fewer than two frames' worth of bytes can't hold two complete frames, so
 		// once the older bytes are discarded, the first valid frame found is the latest
-		return (2 * static_cast<size_t>(frameLength)) - 1;
+		return (2 * static_cast<size_t>(frameSize)) - 1;
 	}
 
-	/// @brief Wait for the latest valid frame, using rolling validation. Every byte received is written to a buffer one
-	/// @brief frame long, so that if a frame is invalid, the search can carry on from the next header within the buffer
+	/// @brief Wait for the latest valid frame, using rolling validation. Every byte received is written to a buffer the
+	/// @brief size of one frame, so that if a frame is invalid, the search can carry on from the next header within the buffer
 	/// @tparam HEADER_BYTE_ONE The frame's first header byte (its Frame Header)
 	/// @tparam HEADER_BYTE_TWO The frame's second header byte (its Function Mark)
 	/// @tparam SUM_CHECK_INDEX The index of the frame's Sum Check
-	/// @tparam LENGTH The frame's length (bytes)
+	/// @tparam SIZE The frame's size (bytes)
 	/// @param frame Receives the frame, in order from its Frame Header. Only changed if a frame is found
 	/// @param timeoutMillis How long to wait for more bytes (ms). 0 uses only the bytes already received
 	/// @return True if a valid frame was found in time
-	template <uint8_t HEADER_BYTE_ONE, uint8_t HEADER_BYTE_TWO, uint8_t SUM_CHECK_INDEX, uint8_t LENGTH>
-	bool readFrame(uint8_t (&frame)[LENGTH], const uint32_t timeoutMillis)
+	template <uint8_t HEADER_BYTE_ONE, uint8_t HEADER_BYTE_TWO, uint8_t SUM_CHECK_INDEX, uint8_t SIZE>
+	bool readFrame(uint8_t (&frame)[SIZE], const uint32_t timeoutMillis)
 	{
 		static_assert(HEADER_BYTE_ONE != 0, "Buffers start as zeros, so a first header byte of 0 could be found before any byte is received");
-		static_assert(LENGTH <= INT8_MAX, "frameStartIndex is an int8_t, so it must be able to hold every index in the buffer");
-		static_assert(SUM_CHECK_INDEX < LENGTH, "The Sum Check must be inside the frame");
+		static_assert(SIZE <= INT8_MAX, "frameStartIndex is an int8_t, so it must be able to hold every index in the buffer");
+		static_assert(SUM_CHECK_INDEX < SIZE, "The Sum Check must be inside the frame");
 
 		// Frames build up if they aren't read as often as they're sent
-		discardBytes(calcBytesKept(LENGTH));
+		discardBytes(calcBytesKept(SIZE));
 		size_t bytesWaiting = bytesAvailable();
 
-		uint8_t buffer[LENGTH] = {};
+		uint8_t buffer[SIZE] = {};
 		uint8_t bufferIndex = 0;	 // Where the latest byte is
 		int8_t frameStartIndex = -1; // Where the frame's first header byte is, or -1 if no header has been found
 		const uint32_t startMillis = millis();
@@ -315,40 +315,40 @@ protected:
 		{
 			if (bytesWaiting > 0)
 			{
-				bufferIndex = (bufferIndex + 1) % LENGTH;
+				bufferIndex = (bufferIndex + 1) % SIZE;
 				buffer[bufferIndex] = readByte();
 				--bytesWaiting;
 
 				if (frameStartIndex < 0)
 				{
 					// Have we found a header?
-					const uint8_t previousIndex = (bufferIndex + LENGTH - 1) % LENGTH;
+					const uint8_t previousIndex = (bufferIndex + SIZE - 1) % SIZE;
 					if ((buffer[previousIndex] == HEADER_BYTE_ONE) && (buffer[bufferIndex] == HEADER_BYTE_TWO))
 					{
 						frameStartIndex = static_cast<int8_t>(previousIndex); // Start collecting the frame..
 					}
 				}
 				// The latest byte is the frame's last when the next position is the frame's start
-				else if (((bufferIndex + 1) % LENGTH) == frameStartIndex)
+				else if (((bufferIndex + 1) % SIZE) == frameStartIndex)
 				{
 					// The frame is full. Does it pass the sum check?
 					const uint8_t frameStart = static_cast<uint8_t>(frameStartIndex);
-					const uint8_t bufferSumCheckIndex = (frameStart + SUM_CHECK_INDEX) % LENGTH;
-					if (buffer[bufferSumCheckIndex] == calcSumCheck(buffer, LENGTH, bufferSumCheckIndex))
+					const uint8_t bufferSumCheckIndex = (frameStart + SUM_CHECK_INDEX) % SIZE;
+					if (buffer[bufferSumCheckIndex] == calcSumCheck(buffer, SIZE, bufferSumCheckIndex))
 					{
 						// The frame is valid. It may wrap round the buffer, so it's copied out in order, starting from its header
-						for (uint8_t frameIndex = 0; frameIndex < LENGTH; ++frameIndex)
-							frame[frameIndex] = buffer[(frameStart + frameIndex) % LENGTH];
+						for (uint8_t frameIndex = 0; frameIndex < SIZE; ++frameIndex)
+							frame[frameIndex] = buffer[(frameStart + frameIndex) % SIZE];
 
 						return true;
 					}
 
 					// The frame is invalid, so carry on from the next header within the buffer (if there is one)
 					frameStartIndex = -1;
-					for (uint8_t offset = 1; offset < (LENGTH - 1); ++offset)
+					for (uint8_t offset = 1; offset < (SIZE - 1); ++offset)
 					{
-						const uint8_t firstIndex = (frameStart + offset) % LENGTH;
-						const uint8_t secondIndex = (firstIndex + 1) % LENGTH;
+						const uint8_t firstIndex = (frameStart + offset) % SIZE;
+						const uint8_t secondIndex = (firstIndex + 1) % SIZE;
 
 						if ((buffer[firstIndex] == HEADER_BYTE_ONE) && (buffer[secondIndex] == HEADER_BYTE_TWO))
 						{
@@ -369,20 +369,20 @@ protected:
 	/// @return True if the request was sent
 	bool requestSettings()
 	{
-		uint8_t request[F_SETTING_FRAME0_LENGTH];
+		uint8_t request[F_SETTING_FRAME0_SIZE];
 		populateSettingsRequest(request);
 
-		return writeBytes(request, F_SETTING_FRAME0_LENGTH);
+		return writeBytes(request, F_SETTING_FRAME0_SIZE);
 	}
 
 	/// @brief Send the device a request for one measurement, which it sends back as an NLink_TOFSense_Frame0
 	/// @return True if the request was sent
 	bool requestMeasurement()
 	{
-		uint8_t request[READ_FRAME0_LENGTH];
+		uint8_t request[READ_FRAME0_SIZE];
 		populateMeasurementRequest(request);
 
-		return writeBytes(request, READ_FRAME0_LENGTH);
+		return writeBytes(request, READ_FRAME0_SIZE);
 	}
 
 	/// @brief Only created as part of a derived version
@@ -411,13 +411,13 @@ public:
 
 		// The request and reply have to be transmitted, and the device has to process the request, so that the
 		// reply should be the latest settings frame when it's searched for
-		const uint8_t bytesTransmitted = static_cast<uint8_t>(F_SETTING_FRAME0_LENGTH + F_SETTING_FRAME0_LENGTH);
-		delayMicroseconds(calcTransmitMicros(bytesTransmitted, _baudRate) + DEVICE_PROCESSING_MICROS);
+		const uint8_t transmittedSize = static_cast<uint8_t>(F_SETTING_FRAME0_SIZE + F_SETTING_FRAME0_SIZE);
+		delayMicroseconds(calcTransmitMicros(transmittedSize, _baudRate) + DEVICE_PROCESSING_MICROS);
 
 		// Allows for the request and reply at the slowest baud rate, plus any measurement frames sent in between
 		constexpr uint32_t RESPONSE_TIMEOUT_MILLIS = 250;
 
-		uint8_t frame[F_SETTING_FRAME0_LENGTH];
+		uint8_t frame[F_SETTING_FRAME0_SIZE];
 		if (!readFrame<F_SETTING_FRAME0_FRAME_HEADER, F_SETTING_FRAME0_FUNCTION_MARK, F_SETTING_FRAME0_SUM_CHECK_INDEX>(frame, RESPONSE_TIMEOUT_MILLIS))
 			return false;
 
@@ -442,8 +442,8 @@ public:
 
 			// The request and reply have to be transmitted, and the device has to process the request, so that the
 			// reply should be the latest measurement frame when it's searched for
-			const uint8_t bytesTransmitted = static_cast<uint8_t>(READ_FRAME0_LENGTH + FRAME0_LENGTH);
-			delayMicroseconds(calcTransmitMicros(bytesTransmitted, _baudRate) + DEVICE_PROCESSING_MICROS);
+			const uint8_t transmittedSize = static_cast<uint8_t>(READ_FRAME0_SIZE + FRAME0_SIZE);
+			delayMicroseconds(calcTransmitMicros(transmittedSize, _baudRate) + DEVICE_PROCESSING_MICROS);
 		}
 		else
 			return false;
@@ -451,7 +451,7 @@ public:
 		// How long to wait for a measurement frame, if a valid one hasn't already been received
 		constexpr uint32_t FRAME_TIMEOUT_MILLIS = 10;
 
-		uint8_t frame[FRAME0_LENGTH];
+		uint8_t frame[FRAME0_SIZE];
 		if (!readFrame<FRAME_HEADER, FRAME0_FUNCTION_MARK, FRAME0_SUM_CHECK_INDEX>(frame, FRAME_TIMEOUT_MILLIS))
 			return false;
 

@@ -13,11 +13,11 @@ class TOF_Laser_Range_Mini_UART final : public TOF_Laser_Range_Mini, public UART
 protected:
 	/// @brief Write bytes to the device
 	/// @param bytes The bytes to write
-	/// @param byteCount Number of bytes
+	/// @param size Number of bytes
 	/// @return True if every byte was written
-	bool writeBytes(const uint8_t *const bytes, const size_t byteCount) override
+	bool writeBytes(const uint8_t *const bytes, const size_t size) override
 	{
-		return UART_Master::writeBytes(bytes, byteCount);
+		return UART_Master::writeBytes(bytes, size);
 	}
 
 	/// @brief Get how many received bytes are waiting to be read
@@ -36,13 +36,13 @@ protected:
 	}
 
 	/// @brief Discard all but the latest received bytes, so the next byte read is the oldest one kept
-	/// @param keepCount Number of the latest bytes to keep
-	void discardBytes(const size_t keepCount) override
+	/// @param sizeToKeep Number of the latest bytes to keep
+	void discardBytes(const size_t sizeToKeep) override
 	{
 		const size_t bytesWaiting = UART_Master::bytesAvailable();
-		if (bytesWaiting > keepCount)
+		if (bytesWaiting > sizeToKeep)
 		{
-			const size_t bytesToDiscard = bytesWaiting - keepCount;
+			const size_t bytesToDiscard = bytesWaiting - sizeToKeep;
 			for (size_t index = 0; index < bytesToDiscard; ++index)
 				UART_Master::readByte();
 		}

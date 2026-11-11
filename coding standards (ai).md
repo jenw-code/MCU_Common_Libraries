@@ -55,11 +55,11 @@ The coding standards Claude works to on every project: the standing rules, follo
 
 ### Vocabulary and naming
 - **One word per meaning, across the whole file and its family.** Never a mixture of words for the same thing. If a different word is preferred, everything changes to it. Once a thing has a name in the code, comments use that same name.
+- **An amount of data is always a "size", in bytes,** whether it's a buffer's capacity or what the buffer holds. Never "length". "Count" is only for a quantity of something that isn't a collection, such as retries. Names used from outside code, such as a datasheet, keep their own word.
 - **Opposite pairs:** `start`/`stop`, `begin`/`end`, `setup`/`teardown`. A public function and the helper it calls use the same verb.
 - **"Setup" means configuring something so it can be used**, including hardware that already exists. Prefer `setup`/`teardown` to `create`/`destroy`.
 - **Avoid words with more than one meaning in context.** For the hardware at the other end of a link, "device", not "module", which also means software.
-- **Read names as a stranger would.** A name that needs explaining isn't right yet. A size is named in the unit a reader expects (bytes, not a power-of-two exponent).
-- **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".
+- **Read names as a stranger would.** A name that needs explaining isn't right yet. A size is named in the unit a reader expects (bytes, not a power-of-two exponent).- **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".
 
 ### Comments and headers
 - **Comments must be true on every path the code runs.** Check every word, especially "again", "always" and "any". A simple true comment beats an explanatory one that claims something the code can't guarantee.
@@ -90,6 +90,8 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Think about each function's responsibility** to decide where logic belongs. Logic in the wrong place sends a false message about the code around it.
 - **Don't conflate separate concerns.** If a function is hard to name, it's probably doing two things. A function earns its place when its name is clear and its purpose is single.
 - **Keep independent concerns independent.** For example, a transport must not decide device behaviour.
+- **A general-purpose helper holds only what every caller needs.** Anything specific to one caller goes in that caller's class, which builds on the helper. For example, a protocol's handshake line doesn't belong in a UART helper.
+- **Libraries that do the same job on different MCUs have the same structure:** the same config struct, result structs, function names and class form. A developer who knows one MCU's version can then read any other. Their types and internals can differ, since only one MCU's files are compiled into a build.
 - **Structure in proportion to functionality.** A whole class to understand, for a small piece of logic, is disproportionate.
 - **A struct is for data.** Constants don't go in data structs, and a struct's fields shouldn't be half unused depending on a "kind".
 - **Describe similar things the same way.** If one half of a pair is described one way, the other half is described the same way.

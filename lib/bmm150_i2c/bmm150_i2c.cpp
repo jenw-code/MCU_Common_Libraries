@@ -329,8 +329,8 @@ bool BMM150_I2C::readRawData(int16_t &x, int16_t &y, int16_t &z, uint16_t &rhall
 	if (_suspended)
 		return false;
 
-	uint8_t data[DATA_LENGTH];
-	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
+	uint8_t data[DATA_SIZE];
+	if (!readReg(DATA_REGISTER, data, DATA_SIZE))
 		return false;
 
 	parseRawData(data, x, y, z, rhall);
@@ -429,9 +429,9 @@ int16_t BMM150_I2C::compensateZ(const int16_t rawZ, const uint16_t rhall) const
 	return static_cast<int16_t>(processCompZ5 / 16);
 }
 
-bool BMM150_I2C::parseData(const uint8_t *const data, const uint8_t length, int16_t &x, int16_t &y, int16_t &z) const
+bool BMM150_I2C::parseData(const uint8_t *const data, const uint8_t size, int16_t &x, int16_t &y, int16_t &z) const
 {
-	if (length != DATA_LENGTH)
+	if (size != DATA_SIZE)
 		return false;
 
 	int16_t rawX = 0;
@@ -453,11 +453,11 @@ bool BMM150_I2C::readData(int16_t &x, int16_t &y, int16_t &z) const
 	if (_suspended)
 		return false;
 
-	uint8_t data[DATA_LENGTH];
-	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
+	uint8_t data[DATA_SIZE];
+	if (!readReg(DATA_REGISTER, data, DATA_SIZE))
 		return false;
 
-	return parseData(data, DATA_LENGTH, x, y, z);
+	return parseData(data, DATA_SIZE, x, y, z);
 }
 
 bool BMM150_I2C::calculateHeading(const float x, const float y, uint16_t &degrees)

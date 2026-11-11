@@ -6,13 +6,13 @@
 // The size of the Wire buffer is named differently on each core.
 // If none of the known names are defined we fall back to 32 (the smallest common size).
 #if defined(I2C_BUFFER_LENGTH) // ESP32
-#define I2C_MASTER_WIRE_BUFFER_LENGTH I2C_BUFFER_LENGTH
+#define I2C_MASTER_WIRE_BUFFER_SIZE I2C_BUFFER_LENGTH
 #elif defined(BUFFER_LENGTH) // AVR, STM32
-#define I2C_MASTER_WIRE_BUFFER_LENGTH BUFFER_LENGTH
+#define I2C_MASTER_WIRE_BUFFER_SIZE BUFFER_LENGTH
 #elif defined(WIRE_BUFFER_SIZE) // RP2040 (arduino-pico)
-#define I2C_MASTER_WIRE_BUFFER_LENGTH WIRE_BUFFER_SIZE
+#define I2C_MASTER_WIRE_BUFFER_SIZE WIRE_BUFFER_SIZE
 #else
-#define I2C_MASTER_WIRE_BUFFER_LENGTH 32
+#define I2C_MASTER_WIRE_BUFFER_SIZE 32
 #endif
 
 /// @brief Base class for talking to an I2C device, with the MCU as the master
@@ -24,8 +24,8 @@ private:
 	bool _wireStarted = false;
 
 protected:
-	// Capped at UINT8_MAX as requestFrom() takes a uint8_t length on most cores
-	static constexpr size_t MAX_I2C_BUFFER_LENGTH = (I2C_MASTER_WIRE_BUFFER_LENGTH > UINT8_MAX) ? UINT8_MAX : I2C_MASTER_WIRE_BUFFER_LENGTH;
+	// Capped at UINT8_MAX as requestFrom() takes a uint8_t size on most cores
+	static constexpr size_t MAX_I2C_BUFFER_SIZE = (I2C_MASTER_WIRE_BUFFER_SIZE > UINT8_MAX) ? UINT8_MAX : I2C_MASTER_WIRE_BUFFER_SIZE;
 
 	/// @brief Read from consecutive registers, starting at reg
 	/// @param reg  - First register to read

@@ -30,7 +30,7 @@ struct RP235x_UART_DMA_RX_t final
 };
 
 /// @brief A UART transmitter whose bytes a DMA sends from a buffer: the channel, ready for each send. A send is
-/// @brief started with dma_channel_transfer_from_buffer_now(channel, buffer, length), and the buffer must stay
+/// @brief started with dma_channel_transfer_from_buffer_now(channel, buffer, size), and the buffer must stay
 /// @brief unchanged until dma_channel_is_busy(channel) is false
 struct RP235x_UART_DMA_TX_t final
 {
@@ -139,7 +139,7 @@ public:
 	}
 
 	/// @brief Set up a DMA that sends bytes from a buffer out of the UART. It's left ready, not started: each send
-	/// @brief gives its own buffer and length (see RP235x_UART_DMA_TX_t)
+	/// @brief gives its own buffer and size (see RP235x_UART_DMA_TX_t)
 	/// @param dmaConfig The DMA channel to use
 	/// @param uartTX The UART to send on, set up by RP235x_PIO_UART or RP235x_UART
 	/// @param dmaTX Receives the DMA transmitter's info. Only changed if the DMA is set up
@@ -159,7 +159,7 @@ public:
 		channel_config_set_write_increment(&config, false);
 		channel_config_set_dreq(&config, uartTX.dreq);
 
-		// No buffer or length yet, and not started, as each send gives its own
+		// No buffer or size yet, and not started, as each send gives its own
 		dma_channel_configure(
 			dmaConfig.channel,
 			&config,

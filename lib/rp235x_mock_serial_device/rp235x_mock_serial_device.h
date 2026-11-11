@@ -11,7 +11,7 @@
 class RP235x_Mock_Serial_Device final : public Mock_Serial_Base
 {
 private:
-	// A counting pattern (0 to 255) that sendPattern sends repeatedly, so any length can be sent from a small buffer
+	// A counting pattern (0 to 255) that sendPattern sends repeatedly, so any size can be sent from a small buffer
 	static constexpr uint16_t PATTERN_SIZE = 256;
 	static constexpr uint8_t PATTERN_ADDRESS_BITS = 8; // The DMA's reads wrap within 2^8 = 256 bytes
 	static_assert((1 << PATTERN_ADDRESS_BITS) == PATTERN_SIZE, "The DMA's reads must wrap on the pattern's size");
@@ -75,19 +75,19 @@ public:
 			waitForSend();
 
 			const DataArray &array = getArray(index);
-			dma_channel_transfer_from_buffer_now(_tx.channel, array.data, array.length);
+			dma_channel_transfer_from_buffer_now(_tx.channel, array.data, array.size);
 		}
 	}
 
-	/// @brief Send a counting pattern (0 to 255, repeated) of any length, e.g. to test a link with a large message
+	/// @brief Send a counting pattern (0 to 255, repeated) of any size, e.g. to test a link with a large message
 	/// @brief Returns once the DMA has started, so the core is free while it sends (see sendInProgress)
-	/// @param length Number of bytes to send
-	void sendPattern(const uint32_t length)
+	/// @param size Number of bytes to send
+	void sendPattern(const uint32_t size)
 	{
 		waitForSend();
 		setReadWrap(true);
 
-		dma_channel_transfer_from_buffer_now(_tx.channel, _pattern, length);
+		dma_channel_transfer_from_buffer_now(_tx.channel, _pattern, size);
 	}
 
 	/// @brief Get whether the DMA is still sending

@@ -302,16 +302,16 @@ bool MPU6500_I2C::setI2CMasterDelay(const uint8_t delay)
 	return writeReg(REG_I2C_SLV4_CTRL, &value);
 }
 
-bool MPU6500_I2C::readExternalSensorData(uint8_t *const data, const uint8_t index, const uint8_t length) const
+bool MPU6500_I2C::readExternalSensorData(uint8_t *const data, const uint8_t index, const uint8_t size) const
 {
 	// Register index is addressed as EXT_SENS_DATA_00 + index, and read in one transfer
-	static_assert(REG_EXT_SENS_DATA_23 == (REG_EXT_SENS_DATA_00 + (EXT_SENS_DATA_COUNT - 1)),
+	static_assert(REG_EXT_SENS_DATA_23 == (REG_EXT_SENS_DATA_00 + (EXT_SENS_DATA_SIZE - 1)),
 				  "EXT_SENS_DATA_00 to EXT_SENS_DATA_23 must be contiguous");
 
-	if ((length == 0) || ((index + length) > EXT_SENS_DATA_COUNT))
+	if ((size == 0) || ((index + size) > EXT_SENS_DATA_SIZE))
 		return false;
 
-	return readReg(REG_EXT_SENS_DATA_00 + index, data, length);
+	return readReg(REG_EXT_SENS_DATA_00 + index, data, size);
 }
 
 bool MPU6500_I2C::transferSlave4(const uint8_t addr, const uint8_t reg, const uint8_t data, const bool registerDisabled)
@@ -492,22 +492,22 @@ bool MPU6500_I2C::readFifoCount(uint16_t &count) const
 	return true;
 }
 
-bool MPU6500_I2C::readFifo(uint8_t *const data, const uint16_t length) const
+bool MPU6500_I2C::readFifo(uint8_t *const data, const uint16_t size) const
 {
-	if ((length == 0) || (length > FIFO_SIZE))
+	if ((size == 0) || (size > FIFO_SIZE))
 		return false;
 
 	// Each read of FIFO_R_W returns the next FIFO byte, so the data is read in chunks that fit the I2C buffer
 	uint16_t bytesRead = 0;
-	while (bytesRead < length)
+	while (bytesRead < size)
 	{
-		const uint16_t remaining = length - bytesRead;
-		const uint8_t chunkLength = static_cast<uint8_t>((remaining > MAX_I2C_BUFFER_LENGTH) ? MAX_I2C_BUFFER_LENGTH : remaining);
+		const uint16_t remaining = size - bytesRead;
+		const uint8_t chunkSize = static_cast<uint8_t>((remaining > MAX_I2C_BUFFER_SIZE) ? MAX_I2C_BUFFER_SIZE : remaining);
 
-		if (!readReg(REG_FIFO_R_W, &data[bytesRead], chunkLength))
+		if (!readReg(REG_FIFO_R_W, &data[bytesRead], chunkSize))
 			return false;
 
-		bytesRead += chunkLength;
+		bytesRead += chunkSize;
 	}
 
 	return true;
@@ -607,8 +607,8 @@ void MPU6500_I2C::parseRawData(const uint8_t *const data, RawSensorData &raw) co
 
 bool MPU6500_I2C::readRawData(RawSensorData &raw) const
 {
-	uint8_t data[DATA_LENGTH];
-	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
+	uint8_t data[DATA_SIZE];
+	if (!readReg(DATA_REGISTER, data, DATA_SIZE))
 		return false;
 
 	parseRawData(data, raw);
@@ -620,9 +620,9 @@ int32_t MPU6500_I2C::temperatureFromRaw(const int16_t raw)
 	return ((static_cast<int32_t>(raw) * TEMPERATURE_FACTOR) >> SCALE_SHIFT) + TEMPERATURE_OFFSET;
 }
 
-bool MPU6500_I2C::parseData(const uint8_t *const data, const uint8_t length, SensorData &result) const
+bool MPU6500_I2C::parseData(const uint8_t *const data, const uint8_t size, SensorData &result) const
 {
-	if (length != DATA_LENGTH)
+	if (size != DATA_SIZE)
 		return false;
 
 	RawSensorData raw;
@@ -641,11 +641,11 @@ bool MPU6500_I2C::parseData(const uint8_t *const data, const uint8_t length, Sen
 
 bool MPU6500_I2C::readData(SensorData &result) const
 {
-	uint8_t data[DATA_LENGTH];
-	if (!readReg(DATA_REGISTER, data, DATA_LENGTH))
+	uint8_t data[DATA_SIZE];
+	if (!readReg(DATA_REGISTER, data, DATA_SIZE))
 		return false;
 
-	return parseData(data, DATA_LENGTH, result);
+	return parseData(data, DATA_SIZE, result);
 }
 
 bool MPU6500_I2C::readSelfTestAverageRawData(RawSensorData &average) const

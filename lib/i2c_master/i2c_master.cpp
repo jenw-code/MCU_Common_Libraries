@@ -35,7 +35,7 @@ bool I2C_Master::startWire()
 
 bool I2C_Master::readReg(const uint8_t reg, uint8_t *const pBuf, const size_t size) const
 {
-	if ((size == 0) || (size > MAX_I2C_BUFFER_LENGTH))
+	if ((size == 0) || (size > MAX_I2C_BUFFER_SIZE))
 		return false;
 
 	// Cast both arguments to uint8_t so the call is not ambiguous between requestFrom() overloads on different cores
@@ -69,7 +69,7 @@ bool I2C_Master::writeReg(const uint8_t reg)
 bool I2C_Master::writeReg(const uint8_t reg, const uint8_t *const pBuf, const size_t size)
 {
 	// One byte of the buffer is used by the reg value
-	if (size > (MAX_I2C_BUFFER_LENGTH - 1))
+	if (size > (MAX_I2C_BUFFER_SIZE - 1))
 		return false;
 
 	_wire.beginTransmission(_address);
@@ -79,28 +79,28 @@ bool I2C_Master::writeReg(const uint8_t reg, const uint8_t *const pBuf, const si
 
 bool I2C_Master::writeRegExtended(const uint8_t reg, const uint8_t *const pBuf, const size_t size)
 {
-	// The Wire buffer has a size limit (MAX_I2C_BUFFER_LENGTH) and one byte of it is used by the reg value.
+	// The Wire buffer has a size limit (MAX_I2C_BUFFER_SIZE) and one byte of it is used by the reg value.
 	// We therefore need to chunk the data accordingly.
-	constexpr size_t CHUNK_SIZE = 16; // Needs be divisible by 2 and less than MAX_I2C_BUFFER_LENGTH
-	static_assert(CHUNK_SIZE < MAX_I2C_BUFFER_LENGTH, "CHUNK_SIZE must be less than MAX_I2C_BUFFER_LENGTH");
+	constexpr size_t CHUNK_SIZE = 16; // Needs be divisible by 2 and less than MAX_I2C_BUFFER_SIZE
+	static_assert(CHUNK_SIZE < MAX_I2C_BUFFER_SIZE, "CHUNK_SIZE must be less than MAX_I2C_BUFFER_SIZE");
 
 	size_t bytesWritten = 0;
 
 	while (bytesWritten < size)
 	{
-		const size_t byteCountToWrite = ((size - bytesWritten) > CHUNK_SIZE) ? CHUNK_SIZE : (size - bytesWritten);
+		const size_t sizeToWrite = ((size - bytesWritten) > CHUNK_SIZE) ? CHUNK_SIZE : (size - bytesWritten);
 
 		_wire.beginTransmission(_address);
 		if (_wire.write(static_cast<uint8_t>(reg + bytesWritten)) != 1)
 			return false;
 
-		if (_wire.write(&pBuf[bytesWritten], byteCountToWrite) != byteCountToWrite)
+		if (_wire.write(&pBuf[bytesWritten], sizeToWrite) != sizeToWrite)
 			return false;
 
 		if (_wire.endTransmission() != 0)
 			return false;
 
-		bytesWritten += byteCountToWrite;
+		bytesWritten += sizeToWrite;
 	}
 
 	return true;
