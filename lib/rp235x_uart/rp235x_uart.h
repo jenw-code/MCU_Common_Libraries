@@ -7,12 +7,14 @@
 #include <hardware/uart.h>
 #include "uart_master.h"
 
-/// @brief One direction of a hardware UART: the UART it uses, and its pin. The UART is held as its index, not as a
-/// @brief uart_inst_t pointer, so a config can be a constexpr (the pointer comes from a cast that isn't allowed in one)
+/// @brief One direction of a hardware UART: the UART it uses, its pin, and its baud rate. The UART is held as its
+/// @brief index, not as a uart_inst_t pointer, so a config can be a constexpr (the pointer comes from a cast that
+/// @brief isn't allowed in one)
 struct RP235x_UART_Config_t final
 {
 	uint8_t uartIndex = 0; // 0 to NUM_UARTS - 1
 	uint8_t pin = 0;	   // The GPIO the UART receives or sends on. It must be one of that UART's pins
+	UART_Master::BaudRate baudRate = UART_Master::BaudRate::Baud115200;
 };
 
 struct RP235x_UART_RX_t final
@@ -35,6 +37,11 @@ struct RP235x_UART_TX_t final
 /// @brief Its RX FIFO is only 32 bytes, so the bytes received must be read as they arrive, e.g. by a DMA
 class RP235x_UART final
 {
+	// TODO: One hardware UART serves both directions, but each setup and teardown acts on the
+	// whole UART. Record which directions are set up, and the baud rate, per UART, so that:
+	// - setup checks both directions use the same baud rate, and only the first one calls
+	//   uart_init, which resets the UART
+	// - teardown only stops the UART once neither direction uses it
 private:
 	/// @brief Tear down one direction of a hardware UART: stop the UART, and return its pin to GPIO
 	/// @param config The UART and its pin, as given to setup_RX or setup_TX
@@ -49,11 +56,11 @@ public:
 	RP235x_UART() = delete;
 
 	/// @brief Set up a hardware UART that receives
-	/// @param rxConfig The UART to receive with, and the pin to receive on. The pin must be one of the UART's RX pins
-	/// @param baudRate The baud rate
+	/// @param rxConfig The UART to receive with, the pin to receive on, and the baud rate. The pin must be one of the
+	/// UART's RX pins
 	/// @param rx Receives the UART's RX info. Only changed if the UART is set up
-	/// @return True if set up,false if the UART doesn't exist
-	static bool setup_RX(const RP235x_UART_Config_t &rxConfig, const UART_Master::BaudRate baudRate, RP235x_UART_RX_t &rx)
+	/// @return True if set up, false if the UART doesn't exist
+	static bool setup_RX(const RP235x_UART_Config_t &rxConfig, RP235x_UART_RX_t &rx)
 	{
 		if (rxConfig.uartIndex >= NUM_UARTS)
 			return false;
@@ -62,22 +69,22 @@ public:
 		const uint rxPin = rxConfig.pin;
 
 		// Enable the DMA requests (the frame format is set to 8N1: 8 data bits, no parity, 1 stop bit)
-		uart_init(uartInstance, static_cast<uint>(baudRate));
+		uart_init(uartInstance, static_cast<uint>(rxConfig.baudRate));
 		gpio_set_function(rxPin, UART_FUNCSEL_NUM(uartInstance, rxPin));
 
 		rx.address = &uart_get_hw(uartInstance)->dr;
 		rx.dreq = uart_get_dreq_num(uartInstance, false);
-		rx.baudRate = static_cast<uint32_t>(baudRate);
+		rx.baudRate = static_cast<uint32_t>(rxConfig.baudRate);
 
 		return true;
 	}
 
 	/// @brief Set up a hardware UART that sends
-	/// @param txConfig The UART to send with, and the pin to send on. The pin must be one of the UART's TX pins
-	/// @param baudRate The baud rate
+	/// @param txConfig The UART to send with, the pin to send on, and the baud rate. The pin must be one of the
+	/// UART's TX pins
 	/// @param tx Receives the UART's TX info. Only changed if the UART is set up
-	/// @return True if set up,false if the UART doesn't exist
-	static bool setup_TX(const RP235x_UART_Config_t &txConfig, const UART_Master::BaudRate baudRate, RP235x_UART_TX_t &tx)
+	/// @return True if set up, false if the UART doesn't exist
+	static bool setup_TX(const RP235x_UART_Config_t &txConfig, RP235x_UART_TX_t &tx)
 	{
 		if (txConfig.uartIndex >= NUM_UARTS)
 			return false;
@@ -86,14 +93,14 @@ public:
 		const uint txPin = txConfig.pin;
 
 		// Enable the DMA requests (the frame format is set to 8N1: 8 data bits, no parity, 1 stop bit)
-		uart_init(uartInstance, static_cast<uint>(baudRate));
+		uart_init(uartInstance, static_cast<uint>(txConfig.baudRate));
 		gpio_set_function(txPin, UART_FUNCSEL_NUM(uartInstance, txPin));
 
 		tx.address = &uart_get_hw(uartInstance)->dr;
 		tx.statusAddress = &uart_get_hw(uartInstance)->fr;
 		tx.fullMask = UART_UARTFR_TXFF_BITS;
 		tx.dreq = uart_get_dreq_num(uartInstance, true);
-		tx.baudRate = static_cast<uint32_t>(baudRate);
+		tx.baudRate = static_cast<uint32_t>(txConfig.baudRate);
 
 		return true;
 	}
@@ -115,13 +122,15 @@ public:
 
 //--------------------------------------------------------------------------------------------------
 
-/// @brief One direction of a PIO UART: the state machine it uses, and its pin. The PIO is held as its index, not as a
-/// @brief PIO pointer, so a config can be a constexpr (the pointer comes from a cast that isn't allowed in one)
+/// @brief One direction of a PIO UART: the state machine it uses, its pin, and its baud rate. The PIO is held as its
+/// @brief index, not as a PIO pointer, so a config can be a constexpr (the pointer comes from a cast that isn't
+/// @brief allowed in one)
 struct RP235x_PIO_UART_Config_t final
 {
 	uint8_t pioIndex = 0;	  // 0 to NUM_PIOS - 1
 	uint8_t stateMachine = 0; // 0 to NUM_PIO_STATE_MACHINES - 1
 	uint8_t pin = 0;		  // The GPIO the state machine receives or sends on
+	UART_Master::BaudRate baudRate = UART_Master::BaudRate::Baud115200;
 };
 
 /// @brief Helper that receives and sends UART (8N1) on any GPIOs using a PIO
@@ -256,12 +265,11 @@ public:
 	RP235x_PIO_UART() = delete;
 
 	/// @brief Set up a PIO UART that receives
-	/// @param rxConfig The state machine to receive with, and the pin to receive on. Its PIO's GPIO base must already
-	/// let it reach the pin
-	/// @param baudRate The baud rate
+	/// @param rxConfig The state machine to receive with, the pin to receive on, and the baud rate. Its PIO's GPIO base
+	/// must already let it reach the pin
 	/// @param rx Receives the UART's RX info. Only changed if the UART is set up
-	/// @return True if set up,false if the state machine can't be set up (see setupStateMachine)
-	static bool setup_RX(const RP235x_PIO_UART_Config_t &rxConfig, const UART_Master::BaudRate baudRate, RP235x_UART_RX_t &rx)
+	/// @return True if set up, false if the state machine can't be set up (see setupStateMachine)
+	static bool setup_RX(const RP235x_PIO_UART_Config_t &rxConfig, RP235x_UART_RX_t &rx)
 	{
 		uint offset;
 		if (!setupStateMachine(rxConfig, RX_PROGRAM, _rxPrograms, offset))
@@ -281,7 +289,7 @@ public:
 		sm_config_set_in_shift(&config, true, true, RX_BITS_PER_PUSH); // Shift right, autopush each byte
 		sm_config_set_fifo_join(&config, PIO_FIFO_JOIN_RX);			   // Only receiving, so double the RX FIFO
 
-		const float cyclesPerSecond = static_cast<float>(RX_CYCLES_PER_BIT) * static_cast<float>(static_cast<uint32_t>(baudRate));
+		const float cyclesPerSecond = static_cast<float>(RX_CYCLES_PER_BIT) * static_cast<float>(static_cast<uint32_t>(rxConfig.baudRate));
 		sm_config_set_clkdiv(&config, static_cast<float>(clock_get_hz(clk_sys)) / cyclesPerSecond);
 
 		pio_sm_init(pio, stateMachine, offset, &config);
@@ -289,18 +297,17 @@ public:
 
 		rx.address = reinterpret_cast<const volatile uint8_t *>(&pio->rxf[stateMachine]) + RX_FIFO_TOP_BYTE;
 		rx.dreq = pio_get_dreq(pio, stateMachine, false);
-		rx.baudRate = static_cast<uint32_t>(baudRate);
+		rx.baudRate = static_cast<uint32_t>(rxConfig.baudRate);
 
 		return true;
 	}
 
 	/// @brief Set up a PIO UART that sends
-	/// @param txConfig The state machine to send with, and the pin to send on. Its PIO's GPIO base must already let
-	/// it reach the pin
-	/// @param baudRate The baud rate
+	/// @param txConfig The state machine to send with, the pin to send on, and the baud rate. Its PIO's GPIO base must
+	/// already let it reach the pin
 	/// @param tx Receives the UART's TX info. Only changed if the UART is set up
-	/// @return True if set up,false if the state machine can't be set up (see setupStateMachine)
-	static bool setup_TX(const RP235x_PIO_UART_Config_t &txConfig, const UART_Master::BaudRate baudRate, RP235x_UART_TX_t &tx)
+	/// @return True if set up, false if the state machine can't be set up (see setupStateMachine)
+	static bool setup_TX(const RP235x_PIO_UART_Config_t &txConfig, RP235x_UART_TX_t &tx)
 	{
 		uint offset;
 		if (!setupStateMachine(txConfig, TX_PROGRAM, _txPrograms, offset))
@@ -324,7 +331,7 @@ public:
 		sm_config_set_out_shift(&config, true, false, 32);	// Shift right, so bytes go LSB first. No autopull, as the program pulls
 		sm_config_set_fifo_join(&config, PIO_FIFO_JOIN_TX); // Only sending, so double the TX FIFO
 
-		const float cyclesPerSecond = static_cast<float>(TX_CYCLES_PER_BIT) * static_cast<float>(static_cast<uint32_t>(baudRate));
+		const float cyclesPerSecond = static_cast<float>(TX_CYCLES_PER_BIT) * static_cast<float>(static_cast<uint32_t>(txConfig.baudRate));
 		sm_config_set_clkdiv(&config, static_cast<float>(clock_get_hz(clk_sys)) / cyclesPerSecond);
 
 		pio_sm_init(pio, stateMachine, offset, &config);
@@ -334,7 +341,7 @@ public:
 		tx.statusAddress = &pio->fstat;
 		tx.fullMask = static_cast<uint32_t>(1) << (PIO_FSTAT_TXFULL_LSB + stateMachine);
 		tx.dreq = pio_get_dreq(pio, stateMachine, true);
-		tx.baudRate = static_cast<uint32_t>(baudRate);
+		tx.baudRate = static_cast<uint32_t>(txConfig.baudRate);
 
 		return true;
 	}
