@@ -24,7 +24,7 @@ private:
 	static_assert(calcBytesKept(FRAME0_SIZE) < DMA_BUFFER_SIZE, "The DMA buffer must be larger than the bytes kept for a NLink_TOFSense_Frame0");
 	static_assert(calcBytesKept(F_SETTING_FRAME0_SIZE) < DMA_BUFFER_SIZE, "The DMA buffer must be larger than the bytes kept for a NLink_TOFSense_F_Setting_Frame0");
 
-	const RP235x_UART_DMA_RX_t<DMA_BUFFER_SIZE> _dmaRX; // The DMA ring the device's data is received into
+	const RP235x_UART_DMA_RX_Ring_t<DMA_BUFFER_SIZE> _dmaRX; // The DMA ring the device's data is received into
 	const RP235x_UART_TX_t _tx;							// The UART requests are sent to the device on
 	bool _started = false;
 
@@ -105,7 +105,7 @@ protected:
 public:
 	/// @param dmaRX The DMA ring to receive the device's data into, set up by RP235x_UART_DMA
 	/// @param tx The UART to send requests to the device on, set up by RP235x_PIO_UART or RP235x_UART
-	RP235x_TOF_Laser_Range_Mini_UART_DMA(const RP235x_UART_DMA_RX_t<DMA_BUFFER_SIZE> &dmaRX,
+	RP235x_TOF_Laser_Range_Mini_UART_DMA(const RP235x_UART_DMA_RX_Ring_t<DMA_BUFFER_SIZE> &dmaRX,
 										 const RP235x_UART_TX_t &tx) : TOF_Laser_Range_Mini(static_cast<uint32_t>(BAUD_RATE)),
 																	   _dmaRX(dmaRX),
 																	   _tx(tx) {}

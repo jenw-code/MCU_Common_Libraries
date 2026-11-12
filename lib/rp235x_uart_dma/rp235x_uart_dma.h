@@ -8,7 +8,14 @@
 /// @brief so a config can be a constexpr
 /// @tparam BUFFER_SIZE The ring buffer's size (bytes). A power of 2, from 2 to 32768
 template <uint16_t BUFFER_SIZE>
-struct RP235x_UART_DMA_RX_Config_t final
+struct RP235x_UART_DMA_RX_Ring_Config_t final
+{
+	uint8_t channel = 0; // 0 to NUM_DMA_CHANNELS - 1
+};
+
+/// @brief The DMA channel used to receive a UART one transfer at a time. The channel is held as its index, so a
+/// @brief config can be a constexpr
+struct RP235x_UART_DMA_RX_Transfer_Config_t final
 {
 	uint8_t channel = 0; // 0 to NUM_DMA_CHANNELS - 1
 };
@@ -22,9 +29,18 @@ struct RP235x_UART_DMA_TX_Config_t final
 /// @brief A UART receiver whose bytes a DMA copies into a ring buffer: the ring, and the channel filling it
 /// @tparam BUFFER_SIZE The ring buffer's size (bytes)
 template <uint16_t BUFFER_SIZE>
-struct RP235x_UART_DMA_RX_t final
+struct RP235x_UART_DMA_RX_Ring_t final
 {
 	volatile uint8_t *buffer = nullptr; // The ring buffer, declared by the caller of setup_RX
+	uint channel = 0;
+	uint32_t baudRate = 0; // The UART's baud rate (bits per second)
+};
+
+/// @brief A UART receiver whose bytes a DMA copies into a buffer, one transfer at a time: the channel, ready for
+/// @brief each transfer. A transfer is started with dma_channel_transfer_to_buffer_now(channel, buffer, size), and
+/// @brief runs until size bytes are received or it's stopped with dma_channel_abort(channel)
+struct RP235x_UART_DMA_RX_Transfer_t final
+{
 	uint channel = 0;
 	uint32_t baudRate = 0; // The UART's baud rate (bits per second)
 };
@@ -38,8 +54,8 @@ struct RP235x_UART_DMA_TX_t final
 	uint32_t baudRate = 0; // The UART's baud rate (bits per second)
 };
 
-/// @brief Helper that has a DMA receive a UART's bytes into a ring buffer, or send a UART's bytes from a buffer, so
-/// @brief no core time is spent per byte
+/// @brief Helper that has a DMA receive a UART's bytes into a ring buffer or one transfer at a time, or send a UART's
+/// @brief bytes from a buffer, so no core time is spent per byte
 class RP235x_UART_DMA final
 {
 private:
@@ -93,8 +109,8 @@ public:
 	/// @return True if set up, false if the UART hasn't been set up, the buffer isn't aligned to its own size, or the
 	/// 		channel doesn't exist or is already claimed
 	template <uint16_t BUFFER_SIZE>
-	static bool setup_RX(const RP235x_UART_DMA_RX_Config_t<BUFFER_SIZE> &dmaConfig, const RP235x_UART_RX_t &uartRX,
-						 volatile uint8_t (&buffer)[BUFFER_SIZE], RP235x_UART_DMA_RX_t<BUFFER_SIZE> &dmaRX)
+	static bool setup_RX(const RP235x_UART_DMA_RX_Ring_Config_t<BUFFER_SIZE> &dmaConfig, const RP235x_UART_RX_t &uartRX,
+						 volatile uint8_t (&buffer)[BUFFER_SIZE], RP235x_UART_DMA_RX_Ring_t<BUFFER_SIZE> &dmaRX)
 	{
 		static_assert((BUFFER_SIZE >= 2) && (BUFFER_SIZE <= 32768), "The DMA ring supports 2 to 32768 bytes");
 
@@ -138,6 +154,42 @@ public:
 		return true;
 	}
 
+	/// @brief Set up a DMA that copies bytes the UART receives into a buffer, one transfer at a time. It's left
+	/// @brief ready, not started: each transfer gives its own buffer and size (see RP235x_UART_DMA_RX_Transfer_t)
+	/// @param dmaConfig The DMA channel to use
+	/// @param uartRX The UART to receive from, set up by RP235x_PIO_UART or RP235x_UART
+	/// @param dmaRX Receives the DMA receiver's info. Only changed if the DMA is set up
+	/// @return True if set up, false if the UART hasn't been set up, or the channel doesn't exist or is already claimed
+	static bool setup_RX(const RP235x_UART_DMA_RX_Transfer_Config_t &dmaConfig, const RP235x_UART_RX_t &uartRX,
+						 RP235x_UART_DMA_RX_Transfer_t &dmaRX)
+	{
+		if (uartRX.address == nullptr)
+			return false;
+
+		if (!setupChannel(dmaConfig.channel))
+			return false;
+
+		dma_channel_config config = dma_channel_get_default_config(dmaConfig.channel);
+		channel_config_set_transfer_data_size(&config, DMA_SIZE_8);
+		channel_config_set_read_increment(&config, false);
+		channel_config_set_write_increment(&config, true);
+		channel_config_set_dreq(&config, uartRX.dreq);
+
+		// No buffer or size yet, and not started, as each transfer gives its own
+		dma_channel_configure(
+			dmaConfig.channel,
+			&config,
+			nullptr,
+			uartRX.address,
+			0,
+			false);
+
+		dmaRX.channel = dmaConfig.channel;
+		dmaRX.baudRate = uartRX.baudRate;
+
+		return true;
+	}
+
 	/// @brief Set up a DMA that sends bytes from a buffer out of the UART. It's left ready, not started: each send
 	/// @brief gives its own buffer and size (see RP235x_UART_DMA_TX_t)
 	/// @param dmaConfig The DMA channel to use
@@ -174,11 +226,18 @@ public:
 		return true;
 	}
 
-	/// @brief Tear down a DMA receiver: stop its channel and unclaim it
+	/// @brief Tear down a ring DMA receiver: stop its channel and unclaim it
 	/// @tparam BUFFER_SIZE The ring buffer's size (bytes), given by dmaConfig
 	/// @param dmaConfig The config given to setup_RX
 	template <uint16_t BUFFER_SIZE>
-	static void teardown_RX(const RP235x_UART_DMA_RX_Config_t<BUFFER_SIZE> &dmaConfig)
+	static void teardown_RX(const RP235x_UART_DMA_RX_Ring_Config_t<BUFFER_SIZE> &dmaConfig)
+	{
+		teardownChannel(dmaConfig.channel);
+	}
+
+	/// @brief Tear down a per-transfer DMA receiver: stop its channel and unclaim it
+	/// @param dmaConfig The config given to setup_RX
+	static void teardown_RX(const RP235x_UART_DMA_RX_Transfer_Config_t &dmaConfig)
 	{
 		teardownChannel(dmaConfig.channel);
 	}
