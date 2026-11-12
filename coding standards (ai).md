@@ -35,6 +35,7 @@ The coding standards Claude works to on every project: the standing rules, follo
   - "initialise": a value that will change later.
   - "read": from the device, even for a fixed property.
   - "parse": from bytes already held.
+  - "pack" / "unpack": one value into bytes, and back again (`packUInt32`, `unpackUInt32`).
   - "get": only a cached value or a status.
   - "enable…": only if the call actually makes the thing work; otherwise "set…".
   - `reset()`: the whole device.
@@ -46,7 +47,7 @@ The coding standards Claude works to on every project: the standing rules, follo
   - Self-tests are destructive and say so; cached state stays correct and test-only modes are turned off at the end.
   - Struct constants use designated initializers, one field per line. Arrays are initialised at declaration.
   - In the .cpp, dependencies come first, and the header follows the .cpp order.
-  - Read, compare, and write only if the value changed. Cached device state with guard clauses that `return false`. `Unknown = 0` sentinel values in enums. No STL. Timeouts use `millis()`.
+  - Read, compare, and write only if the value changed. Cached device state with guard clauses that `return false`. An enum's 0 value is its default, so it must reflect reality: `Unknown = 0` when the state isn't known at the start, or the real starting state when it is. No STL. Timeouts use `millis()`.
   - Debug prints use the shared `logStr`/`logValue`, not `Serial` directly.
 - **Judge performance by how often each function is called.**
 - **MCU-specific code says so in its name:** an MCU prefix on its folder, file and class. Code for different MCUs isn't bunched together in one folder.
@@ -56,24 +57,32 @@ The coding standards Claude works to on every project: the standing rules, follo
 ### Vocabulary and naming
 - **One word per meaning, across the whole file and its family.** Never a mixture of words for the same thing. If a different word is preferred, everything changes to it. Once a thing has a name in the code, comments use that same name.
 - **An amount of data is always a "size", in bytes,** whether it's a buffer's capacity or what the buffer holds. Never "length". "Count" is only for a quantity of something that isn't a collection, such as retries. Names used from outside code, such as a datasheet, keep their own word.
+- **"on…" names an event; "handle…" names the function that deals with it.** For example, `onFrameReceived` is the event a caller can hook, and `handleFrameChange` is the code that responds to an interrupt.
 - **Opposite pairs:** `start`/`stop`, `begin`/`end`, `setup`/`teardown`. A public function and the helper it calls use the same verb.
 - **"Setup" means configuring something so it can be used**, including hardware that already exists. Prefer `setup`/`teardown` to `create`/`destroy`.
 - **Avoid words with more than one meaning in context.** For the hardware at the other end of a link, "device", not "module", which also means software.
 - **Read names as a stranger would.** A name that needs explaining isn't right yet. A size is named in the unit a reader expects (bytes, not a power-of-two exponent).- **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".
 
 ### Comments and headers
+- **A detail that's defined once in code isn't repeated in comments.** For example, once a constant says which level means "active", comments elsewhere don't mention levels; otherwise they go stale when the detail changes.
+- **Don't make a comment more specific than its intent needs.** Naming the exact function or detail that relies on a line makes the comment go out of date, or mislead, as soon as the code changes a little. Give the general purpose, with a current use as an example: "Kept to aid in sending data (e.g. used to check when sending has completed)". It names no functions, and the "e.g." shows a use without limiting the value to it, so the comment stays true as uses are added. A comment so general that it only states the obvious ("needed after setup") is pointless.
+- **A comment must read one way only.** A clipped opening such as "Last, so…" can be read as narration ("and lastly") rather than as the reason. State the reason in full: "Attached once everything it uses is set up, so…".
 - **Comments must be true on every path the code runs.** Check every word, especially "again", "always" and "any". A simple true comment beats an explanatory one that claims something the code can't guarantee.
 - **A subtle call gets a comment stating the structure** it builds (for example, a `memset` followed by assigning the fields that matter).
 - **Keep chunks of meaning together.** Break lines between ideas, not mid-idea. Don't wrap a short example; only wrap a very long one.
+- **A function's header gives its purpose, not its mechanism.** Say what it's for ("tell the receiver a frame is about to be sent"), not how it does it ("lower the line"). The code shows the how.
 - **Calculation functions give an example** of an input and its output in their header.
 - **An explanatory comment goes above the line**, not as a side note, and leads with the intent.
 - **Identical lines get identical comments.**
+- **Code doesn't explain the schematic.** Circuit details, such as an external pull-up on a pin, belong in the hardware design, not in comments on the code that uses them.
 - **Each line of a multi-line brief starts with its own `/// @brief`.**
 
 ### Writing code
 - **Write conditions positively, in the terms of the intent.** Name every accepted case, so the check fails closed, rather than rejecting the wrong cases, which fails open.
 - **One truth for data mapping.** A frame or register layout is defined once (the index constants), and code builds or reads it through those indexes, never by position.
 - **No implicit truths.** Every constant is used only for what its name says. The test: "if I change this value, is the code still predictable?"
+- **A value used once, whose name adds nothing, goes straight into the call.** Declaring it first hides that it's used only once. Name it only when the name explains something the expression doesn't.
+- **An early `return` is for a failure or guard.** When two branches are both normal outcomes, use `if`/`else`, so neither reads as an error.
 - **Never `while (true)`.** Put the real condition in the `while`.
 - **Where a line sits shows intent.** A line inside a loop says it may change on each pass, so anything that stays the same for the whole loop goes before it.
 - **Wrap ring indexes with increment-and-if, not modulo**, as modulo is slow on 8-bit MCUs. The exception is a compile-time constant divisor, which the compiler optimises.
@@ -103,6 +112,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Setup takes the resource explicitly** rather than picking one itself, so it fits a planned allocation.
 - **Use a distinct type to force a required step.** If something must be set up a particular way first, give the result its own type and take that type, even if it duplicates another struct's fields. The compiler then enforces what a comment could only ask for, and the signature itself tells the developer what the class requires.
 - **Things configured separately are passed separately.** Don't bundle independent things into one struct or call; kept apart, they can be mixed.
+- **Class sections go private, then protected, then public.** Within each section, compile-time parts (type definitions and `constexpr` constants) come first, then runtime parts. This follows the natural order of dependency.
 - **File order follows use:** what you give (the config), then what you get back, then the helpers that turn one into the other.
 - **No complex web of dependencies** between libraries.
 - **Keep one goal, and judge every decision against it.** Don't add complexity for a goal that isn't wanted, such as genericity nobody needs.
@@ -116,6 +126,8 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **ISR code must be quick.** Anything that waits, delays or takes a lock belongs in the main loop; the ISR at most marks work as due.
 
 ### Judging a design
+- **A library succeeds when it's simple to use, not just when it works.** Start a design from what a developer writes to use it, and keep that as simple as the job allows. Complexity a user has to deal with, such as nested templates in a declaration, is a design failure even if the code works.
+- **Don't rely on a shared hardware resource that can't report it's in use.** Without a busy flag or a claim, another user can take it over silently and corrupt the result.
 - **Agree the overall approach first, at a high level:** the responsibilities and how the pieces fit. Low-level detail comes once the structure is agreed.
 - **The first solution isn't necessarily the right one.** Compare alternatives before presenting one, and challenge every solution with fresh eyes.
 - **Never show a solution you're not happy with.** Keep thinking until it's one you'd stand behind, rather than presenting it with caveats.
