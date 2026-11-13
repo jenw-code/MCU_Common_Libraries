@@ -7,7 +7,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 **KISS: keep it simple, stupid.** Read the code cold, without context. If it only makes sense with an explanation, it isn't clear yet. Clarity and efficiency are the goals; "less code" and compactness never are. Clear code often ends up smaller, but as a result of clarity, never as the aim.
 
 1. **Comments explain intent, never functionality.** The code shows what it does; a comment gives the real reason a line exists. No side effect given as the reason, no obvious purpose. If a name already shows the intent, no comment. Plain English, wrapped at about 85 characters.
-2. **Density of logic.** Don't pack several pieces of logic into one expression; give each its own simple, named step. A single guard with one outcome is fine.
+2. **Density of logic.** Don't pack several pieces of logic into one expression; give each its own simple, named step. A single guard with one outcome is fine. But don't name a value that's only used once, directly below: a `bool` set and then tested on the next line adds a name without adding meaning, so the condition goes straight in the `if`.
 3. **No clever code.** Never bend a language feature to fit a pattern. Never turn a yes/no question into arithmetic. Write a check in the same terms as its question. Group conditions with the same result into one `if`; keep separate decisions as separate steps.
 4. **Variables.** Declare each one right before the code it relates to. One meaning per variable. A "prev" copy is only for restoring. A default must be honest: an unread default never carries a meaning.
 5. **Buffer indexes.** Named `constexpr` indexes with one comment on the offset calculation, never an inline `buf[REG_A - REG_B]`.
@@ -20,17 +20,19 @@ The coding standards Claude works to on every project: the standing rules, follo
 12. **If the code relies on something, validate it.** A comment isn't a safeguard. `static_assert` at compile time, otherwise a runtime check. Better still, design the assumption out.
 13. **Where a validation goes:** next to the shared declaration if several functions rely on it, otherwise first in the function that relies on it. Never act and then check. Validate once, at the entry point; don't guard what's already guaranteed.
 14. **Never do work that can't ever be used.**
+16. **The code's shape mirrors its intent.** Write it the way you'd explain it: "if the CRC is wrong, report it; otherwise, if the type is unknown, report that; otherwise, deliver the message" becomes exactly that chain. If the code's shape tells a different story (for example, working out every check up front when the first failure stops everything), the intent is lost, however correct the result. Where the code can't easily show its intent, a comment states it. Show the logic clearly even where it may be disagreed with: clear logic can be discussed and corrected, but hidden logic can't.
 15. **Don't be lazy with headers.** Every function documents every `@param` and `@tparam` (what it is, units, range), whatever its scope.
 
 ## C++ / embedded library conventions (PlatformIO Arduino, 32-bit MCUs)
 
-- **No `#define` to change behaviour.** The preprocessor is only for constants; vary behaviour through OO.
+- **Get rid of every warning by removing its cause, not by silencing it.** Warnings left in a build are noise that hides the ones that matter. For example, if the core or board provides a macro that says whether a feature exists (such as `RP2350_PSRAM_CS`), use a simple `#if` on it to leave out the code that causes the warning.
+- **No complex conditional compilation.** A single, simple `#if` / `#else` (for example, testing whether the board provides a feature) is fine. What's ruled out is a file of nested or combined `#if` conditions, which makes a tangle of behaviour nobody can follow. Vary real behaviour through OO or templates.
 - **Floats:** none without a very good reason; use fixed-point scaling. Where floats make the code much clearer at a low call rate, use them with minimal scope, and convert explicitly (`static_cast<float>`).
 - **Template parameters must earn their place** through compile-time code removal or a `static_assert`; otherwise use a runtime parameter, to avoid flash bloat.
 - **`if constexpr` enum chains** end with `else return false;`; values needing no action get an explicit empty, commented branch; multi-value conditions go one per line.
 - **Register bit maps:** one constant per bit, `(1 << n)`, from bit 0 up, reserved and fixed bits included, datasheet names. A multi-bit field is a single binary literal. Shift constants in their own block. `_MASK` only for a real mask.
 - **Binary literals** (`0b…`, no leading zeros) for bitwise or bit-mapping configuration.
-- **Names follow the datasheet** exactly in register and bit mapping. Everywhere else, sensible unabbreviated words. Never cite page or table numbers. Millisecond names end in `MILLIS`. Verbs:
+- **Names follow the datasheet** exactly in register and bit mapping. Everywhere else, sensible unabbreviated words. The exception is an abbreviation so common it loses no meaning (for example "Comms"). Never cite page or table numbers. Millisecond names end in `MILLIS`. Verbs:
   - "populate": a collection filled once that never changes.
   - "initialise": a value that will change later.
   - "read": from the device, even for a fixed property.
@@ -48,8 +50,9 @@ The coding standards Claude works to on every project: the standing rules, follo
   - Struct constants use designated initializers, one field per line. Arrays are initialised at declaration.
   - In the .cpp, dependencies come first, and the header follows the .cpp order.
   - Read, compare, and write only if the value changed. Cached device state with guard clauses that `return false`. An enum's 0 value is its default, so it must reflect reality: `Unknown = 0` when the state isn't known at the start, or the real starting state when it is. No STL. Timeouts use `millis()`.
-  - Debug prints use the shared `logStr`/`logValue`, not `Serial` directly.
-- **Judge performance by how often each function is called.**
+  - Debug prints use the shared `logStr`/`logValue`, not `Serial` directly. Their string literals use `F()`: libraries aren't specific to one MCU, and on cores without memory-mapped flash it keeps the strings out of RAM.
+- **Judge performance by how often each function is called.** A piece of code's priority for tuning is its average time multiplied by how often it runs.
+- **Rare paths, such as error handling, get the simplest code.** Their frequency makes their cost negligible, so don't add work or extra variables to make a rare case perfect.
 - **MCU-specific code says so in its name:** an MCU prefix on its folder, file and class. Code for different MCUs isn't bunched together in one folder.
 
 ## Further lessons
@@ -61,6 +64,9 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Opposite pairs:** `start`/`stop`, `begin`/`end`, `setup`/`teardown`. A public function and the helper it calls use the same verb.
 - **"Setup" means configuring something so it can be used**, including hardware that already exists. Prefer `setup`/`teardown` to `create`/`destroy`.
 - **Avoid words with more than one meaning in context.** For the hardware at the other end of a link, "device", not "module", which also means software.
+- **A new enum value goes where it logically fits**, not simply at the end. For example, errors are ordered as they can occur, so a new one sits beside the errors detected at the same stage.
+- **Type names have no `_t` suffix**, whether class, struct, enum or template parameter. The exception is an alias of a type that already ends in `_t` (for example `using Distance_t = uint32_t;`).
+- **A yes/no choice is a clearly named `bool`, not a two-value enum** (e.g. `TWO_STEP_PAYLOAD_IN_PSRAM`). Use an enum only when there are more than two options, or the two options aren't a yes and a no.
 - **Read names as a stranger would.** A name that needs explaining isn't right yet. A size is named in the unit a reader expects (bytes, not a power-of-two exponent).- **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".
 
 ### Comments and headers
@@ -74,6 +80,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Calculation functions give an example** of an input and its output in their header.
 - **An explanatory comment goes above the line**, not as a side note, and leads with the intent.
 - **Identical lines get identical comments.**
+- **A very pertinent, subtle point starts with "Note:"** to draw the developer's eye to it. Kept for those points only, so it keeps its weight.
 - **Code doesn't explain the schematic.** Circuit details, such as an external pull-up on a pin, belong in the hardware design, not in comments on the code that uses them.
 - **Each line of a multi-line brief starts with its own `/// @brief`.**
 
@@ -87,6 +94,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Where a line sits shows intent.** A line inside a loop says it may change on each pass, so anything that stays the same for the whole loop goes before it.
 - **Wrap ring indexes with increment-and-if, not modulo**, as modulo is slow on 8-bit MCUs. The exception is a compile-time constant divisor, which the compiler optimises.
 - **Initialise every struct member** (`= {}`), since C structs can hold garbage.
+- **Memory a DMA uses in the background is permanent, not local.** A local buffer only works while every caller remembers to wait before returning, and forgetting gives a transient bug that depends on what runs next. A permanent buffer makes the one remaining rule explicit and easy to see: don't write to it while its transfer is running. Waits are then only for ordering (e.g. a line changes only after the last byte has gone), never to keep memory alive.
 - **Public functions take references, not pointers.** A function that produces a result returns `bool` and fills a reference out-parameter, changed only on success.
 - **A utility class** is static functions with a deleted constructor.
 - **Only add something if there's a plan to use it.** A plausible future use isn't enough.
@@ -96,6 +104,9 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Classes with the same functionality have the same structure and behaviour.** Compare them side by side after every change.
 - **Duplication means the design has a flaw.** Shared logic lives once; the classes that differ supply only what genuinely differs. The exception: a small, simple piece (a few lines) can be repeated when sharing it would put it somewhere that confuses that place's purpose.
 - **Don't split one flow across classes.** A developer shouldn't have to jump between classes to follow one flow. Keep the whole flow in one place, and have the others supply self-contained pieces.
+- **Choose inheritance or a template engine by which class drives.** Virtual methods are fine; what hurts clarity is calls going back and forth between base and derived. When the derived class drives and uses what it inherits, inheritance fits. When the base class drives and the derived classes only supply helper methods for it to call, make those helpers an engine the driving class takes as a template parameter, built with its own config and handed in. The flow then reads top to bottom in one class. It's a judgement made case by case, not a fixed rule. One measure: if the derived classes could easily be replaced by a utility class, the inheritance probably isn't needed.
+- **A call names the action, so the callee doesn't infer it from a value.** `startSendFrame()` tells the callee what's happening; `writeLine(LOW)` makes it work out what a level means.
+- **A driver decides *when*; an engine knows *how*.** When one class runs a flow on top of hardware-specific code, the driving class owns every decision (when a frame starts, when to check), and the engine only carries actions out on its hardware. Like a car: the driver turns the headlights on; the electronics know how to power the bulb.
 - **Think about each function's responsibility** to decide where logic belongs. Logic in the wrong place sends a false message about the code around it.
 - **Don't conflate separate concerns.** If a function is hard to name, it's probably doing two things. A function earns its place when its name is clear and its purpose is single.
 - **Keep independent concerns independent.** For example, a transport must not decide device behaviour.

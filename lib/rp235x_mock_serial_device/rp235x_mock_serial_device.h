@@ -16,7 +16,7 @@ private:
 	static constexpr uint8_t PATTERN_ADDRESS_BITS = 8; // The DMA's reads wrap within 2^8 = 256 bytes
 	static_assert((1 << PATTERN_ADDRESS_BITS) == PATTERN_SIZE, "The DMA's reads must wrap on the pattern's size");
 
-	const RP235x_UART_DMA_TX_t _tx; // The DMA the mock device sends on
+	const RP235x_UART_DMA_TX _tx; // The DMA the mock device sends on
 
 	// The DMA's reads wrap on a boundary of the pattern's size, so the pattern must be aligned to it
 	alignas(PATTERN_SIZE) uint8_t _pattern[PATTERN_SIZE] = {};
@@ -50,7 +50,7 @@ private:
 
 public:
 	/// @param tx The DMA to send on, set up by RP235x_UART_DMA
-	explicit RP235x_Mock_Serial_Device(const RP235x_UART_DMA_TX_t &tx) : _tx(tx)
+	explicit RP235x_Mock_Serial_Device(const RP235x_UART_DMA_TX &tx) : _tx(tx)
 	{
 		populatePattern();
 	}
