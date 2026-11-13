@@ -9,7 +9,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 1. **Comments explain intent, never functionality.** The code shows what it does; a comment gives the real reason a line exists. No side effect given as the reason, no obvious purpose. If a name already shows the intent, no comment. Plain English, wrapped at about 85 characters.
 2. **Density of logic.** Don't pack several pieces of logic into one expression; give each its own simple, named step. A single guard with one outcome is fine. But don't name a value that's only used once, directly below: a `bool` set and then tested on the next line adds a name without adding meaning, so the condition goes straight in the `if`.
 3. **No clever code.** Never bend a language feature to fit a pattern. Never turn a yes/no question into arithmetic. Write a check in the same terms as its question. Group conditions with the same result into one `if`; keep separate decisions as separate steps.
-4. **Variables.** Declare each one right before the code it relates to. One meaning per variable. A "prev" copy is only for restoring. A default must be honest: an unread default never carries a meaning.
+4. **Variables.** Declare each one right before the code it relates to. One meaning per variable. A "prev" copy is only for restoring. A default must be honest: an unread default never carries a meaning. A function that sets a state sets its own starting value (e.g. Unknown) at the top, rather than relying on the member's default and on being called only once: that's a hidden assumption.
 5. **Buffer indexes.** Named `constexpr` indexes with one comment on the offset calculation, never an inline `buf[REG_A - REG_B]`.
 6. **A constant's type must never subtly affect a calculation.** The constant has the type that fits its value; the calculation casts it where needed.
 7. **Never shrink a type without a range table** covering every value and intermediate.
@@ -32,11 +32,13 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **`if constexpr` enum chains** end with `else return false;`; values needing no action get an explicit empty, commented branch; multi-value conditions go one per line.
 - **Register bit maps:** one constant per bit, `(1 << n)`, from bit 0 up, reserved and fixed bits included, datasheet names. A multi-bit field is a single binary literal. Shift constants in their own block. `_MASK` only for a real mask.
 - **Binary literals** (`0b…`, no leading zeros) for bitwise or bit-mapping configuration.
-- **Names follow the datasheet** exactly in register and bit mapping. Everywhere else, sensible unabbreviated words. The exception is an abbreviation so common it loses no meaning (for example "Comms"). Never cite page or table numbers. Millisecond names end in `MILLIS`. Verbs:
+- **Names follow the datasheet** exactly in register and bit mapping. Everywhere else, sensible unabbreviated words. The exception is an abbreviation so common it loses no meaning (for example "Comms"). Never cite page or table numbers. Millisecond names end in `MILLIS`. A name says what the value is, never just its unit (`rate`, not `hertz`); the unit goes in the comment. Verbs:
   - "populate": a collection filled once that never changes.
   - "initialise": a value that will change later.
   - "read": from the device, even for a fixed property.
-  - "parse": from bytes already held.
+  - "parse": breaking down a data format from bytes already held, such as a whole frame. You parse XML.
+  - "pack" and "unpack": byte manipulation, putting a value into bytes or taking it out of them. You unpack a
+    stream of bytes.
   - "pack" / "unpack": one value into bytes, and back again (`packUInt32`, `unpackUInt32`).
   - "get": only a cached value or a status.
   - "enable…": only if the call actually makes the thing work; otherwise "set…".
@@ -53,6 +55,7 @@ The coding standards Claude works to on every project: the standing rules, follo
   - Debug prints use the shared `logStr`/`logValue`, not `Serial` directly. Their string literals use `F()`: libraries aren't specific to one MCU, and on cores without memory-mapped flash it keeps the strings out of RAM.
 - **Judge performance by how often each function is called.** A piece of code's priority for tuning is its average time multiplied by how often it runs.
 - **Rare paths, such as error handling, get the simplest code.** Their frequency makes their cost negligible, so don't add work or extra variables to make a rare case perfect.
+- **Criticality decides the level of checking.** Ask: does it matter if this didn't take effect? If not, or if the failure would soon show itself, don't add a check for it. A check nothing else in the code does is also inconsistent.
 - **MCU-specific code says so in its name:** an MCU prefix on its folder, file and class. Code for different MCUs isn't bunched together in one folder.
 
 ## Further lessons
@@ -64,7 +67,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Opposite pairs:** `start`/`stop`, `begin`/`end`, `setup`/`teardown`. A public function and the helper it calls use the same verb.
 - **"Setup" means configuring something so it can be used**, including hardware that already exists. Prefer `setup`/`teardown` to `create`/`destroy`.
 - **Avoid words with more than one meaning in context.** For the hardware at the other end of a link, "device", not "module", which also means software.
-- **A new enum value goes where it logically fits**, not simply at the end. For example, errors are ordered as they can occur, so a new one sits beside the errors detected at the same stage.
+- **A new enum value goes where it logically fits**, not simply at the end. For example, errors are ordered as they can occur, so a new one sits beside the errors detected at the same stage. An unknown state always goes first.
 - **Type names have no `_t` suffix**, whether class, struct, enum or template parameter. The exception is an alias of a type that already ends in `_t` (for example `using Distance_t = uint32_t;`).
 - **A yes/no choice is a clearly named `bool`, not a two-value enum** (e.g. `TWO_STEP_PAYLOAD_IN_PSRAM`). Use an enum only when there are more than two options, or the two options aren't a yes and a no.
 - **Read names as a stranger would.** A name that needs explaining isn't right yet. A size is named in the unit a reader expects (bytes, not a power-of-two exponent).- **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".

@@ -36,8 +36,24 @@ public:
 	// How the device sends measurements over UART
 	enum class OutputMode : uint8_t
 	{
-		Continuous = 0, // Active output: the device sends measurements continuously, at its refresh rate
-		Request = 1		// Query output: the device only sends a measurement when requested
+		Unknown = 0,	// Not read from the device yet
+		Continuous = 1, // Active output: the device sends measurements continuously, at its refresh rate
+		Request = 2		// Query output: the device only sends a measurement when requested
+	};
+
+	// The refresh rates the device accepts
+	enum class RefreshRate : uint16_t
+	{
+		Unknown = 0, // Not read from the device yet, or not a rate the device lists
+		Rate_1Hz = 1,
+		Rate_2Hz = 2,
+		Rate_5Hz = 5,
+		Rate_10Hz = 10,
+		Rate_25Hz = 25,
+		Rate_50Hz = 50,
+		Rate_100Hz = 100,
+		Rate_200Hz = 200,
+		Rate_350Hz = 350
 	};
 
 protected:
@@ -48,7 +64,8 @@ protected:
 		TOF_Laser_Range_Mini_Callback callback = nullptr; // Function to call when minDistanceThreshold met
 	};
 
-	OutputMode _outputMode = OutputMode::Continuous; // The device is supplied in continuous (active) output mode
+	OutputMode _outputMode = OutputMode::Unknown;	 // Read from the device in startDevice, as the device keeps its mode
+	RefreshRate _refreshRate = RefreshRate::Unknown; // Read from the device in startDevice, as the device keeps its rate
 	AutoChecker _autoChecker;
 	volatile bool _checkDistanceRequired = false;
 
@@ -65,7 +82,7 @@ protected:
 	static constexpr uint8_t FRAME0_SIGNAL_STRENGTH_INDEX = 12; // signal_strength (uint16, little-endian, 2 bytes)
 	static constexpr uint8_t FRAME0_RANGE_PRECISION_INDEX = 14; // range_precision (uint8)
 	static constexpr uint8_t FRAME0_SUM_CHECK_INDEX = 15;		// Sum Check (uint8)
-	static constexpr uint8_t FRAME0_SIZE = 16;				// Frame size (bytes)
+	static constexpr uint8_t FRAME0_SIZE = 16;					// Frame size (bytes)
 	static_assert(FRAME0_SUM_CHECK_INDEX < FRAME0_SIZE, "The Sum Check must be inside the frame");
 
 	// Each version's readFrame relies on the Frame Header coming first, followed by the Function Mark
@@ -79,7 +96,7 @@ protected:
 	static constexpr uint8_t READ_FRAME0_ID_INDEX = 4;			  // id (uint8)
 	static constexpr uint8_t READ_FRAME0_RESERVED_2_INDEX = 5;	  // reserved (uint16, 2 bytes)
 	static constexpr uint8_t READ_FRAME0_SUM_CHECK_INDEX = 7;	  // Sum Check (uint8)
-	static constexpr uint8_t READ_FRAME0_SIZE = 8;			  // Frame size (bytes)
+	static constexpr uint8_t READ_FRAME0_SIZE = 8;				  // Frame size (bytes)
 	static_assert(READ_FRAME0_SUM_CHECK_INDEX < READ_FRAME0_SIZE, "The Sum Check must be inside the frame");
 
 	// NLink_TOFSense_F_Setting_Frame0: settings frame, sent to the device to write or read its settings, and sent
@@ -109,7 +126,10 @@ protected:
 	static_assert(F_SETTING_FRAME0_FUNCTION_MARK_INDEX == (F_SETTING_FRAME0_FRAME_HEADER_INDEX + 1), "The Function Mark must follow the Frame Header");
 
 	// NLink_TOFSense_F_Setting_Frame0 mix bits
-	static constexpr uint8_t MIX_READ = (1 << 0); // bit0: 0 = write, 1 = read
+	static constexpr uint8_t MIX_BIT_MIX = (1 << 0); // mix: 0 = write, 1 = read
+
+	// NLink_TOFSense_F_Setting_Frame0 mode bits
+	static constexpr uint8_t MODE_BIT_OUTPUT_MODE = (1 << 1); // output mode: 0 = active, 1 = inquire
 
 	// Frame values
 	static constexpr uint8_t FRAME_HEADER = 0x57;					// Frame Header of NLink_TOFSense_Frame0 and NLink_TOFSense_Read_Frame0
@@ -154,14 +174,14 @@ protected:
 		return (static_cast<uint32_t>(size) * BITS_PER_UART_BYTE * MICROS_PER_SECOND) / baudRate;
 	}
 
-	/// @brief Parse a little-endian field from a frame
+	/// @brief Unpack a little-endian field from a frame
 	/// @tparam T The field's type
 	/// @param frame The frame
 	/// @param fieldIndex The field's index within the frame
 	/// @param size The field's size in the frame (bytes), up to the size of T. Defaults to the size of T
 	/// @return The field's value
 	template <typename T>
-	static T parseField(const uint8_t *const frame, const uint8_t fieldIndex, const uint8_t size = sizeof(T))
+	static T unpackField(const uint8_t *const frame, const uint8_t fieldIndex, const uint8_t size = sizeof(T))
 	{
 		constexpr uint8_t BITS_PER_BYTE = 8;
 
@@ -172,9 +192,93 @@ protected:
 		return value;
 	}
 
+	/// @brief Pack a little-endian field into a frame
+	/// @tparam T The field's type
+	/// @param frame The frame
+	/// @param fieldIndex The field's index within the frame
+	/// @param value The field's value
+	/// @param size The field's size in the frame (bytes), up to the size of T. Defaults to the size of T
+	template <typename T>
+	static void packField(uint8_t *const frame, const uint8_t fieldIndex, const T value, const uint8_t size = sizeof(T))
+	{
+		constexpr uint8_t BITS_PER_BYTE = 8;
+
+		for (uint8_t byteIndex = 0; byteIndex < size; ++byteIndex)
+			frame[fieldIndex + byteIndex] = static_cast<uint8_t>(value >> (BITS_PER_BYTE * byteIndex));
+	}
+
+	/// @brief Calculate a settings mode value with an output mode applied, by setting or clearing its output mode bit
+	/// @param mode The settings mode value
+	/// @param outputMode The output mode. Unknown leaves the mode value unchanged
+	/// @return The updated mode value
+	static uint8_t applyOutputMode(const uint8_t mode, const OutputMode outputMode)
+	{
+		if (outputMode == OutputMode::Continuous)
+			return static_cast<uint8_t>(mode & ~MODE_BIT_OUTPUT_MODE);
+		else if (outputMode == OutputMode::Request)
+			return static_cast<uint8_t>(mode | MODE_BIT_OUTPUT_MODE);
+		else
+			return mode;
+	}
+
+	/// @brief Convert a refresh rate read from the device into a RefreshRate
+	/// @param rate The refresh rate (Hz)
+	/// @return The refresh rate, or Unknown if it isn't one the device lists
+	static RefreshRate toRefreshRate(const uint16_t rate)
+	{
+		switch (rate)
+		{
+		case static_cast<uint16_t>(RefreshRate::Rate_1Hz):
+			return RefreshRate::Rate_1Hz;
+		case static_cast<uint16_t>(RefreshRate::Rate_2Hz):
+			return RefreshRate::Rate_2Hz;
+		case static_cast<uint16_t>(RefreshRate::Rate_5Hz):
+			return RefreshRate::Rate_5Hz;
+		case static_cast<uint16_t>(RefreshRate::Rate_10Hz):
+			return RefreshRate::Rate_10Hz;
+		case static_cast<uint16_t>(RefreshRate::Rate_25Hz):
+			return RefreshRate::Rate_25Hz;
+		case static_cast<uint16_t>(RefreshRate::Rate_50Hz):
+			return RefreshRate::Rate_50Hz;
+		case static_cast<uint16_t>(RefreshRate::Rate_100Hz):
+			return RefreshRate::Rate_100Hz;
+		case static_cast<uint16_t>(RefreshRate::Rate_200Hz):
+			return RefreshRate::Rate_200Hz;
+		case static_cast<uint16_t>(RefreshRate::Rate_350Hz):
+			return RefreshRate::Rate_350Hz;
+		default:
+			return RefreshRate::Unknown;
+		}
+	}
+
+	/// @brief Populate an NLink_TOFSense_F_Setting_Frame0 with the settings, to write them to the device
+	/// @param frame Receives the settings frame
+	/// @param settings The settings to write. Every field is written, so they should come from a read
+	static void populateSettingsFrame(uint8_t (&frame)[F_SETTING_FRAME0_SIZE], const Settings &settings)
+	{
+		// Fields the write doesn't set, including the reserved ones, are sent as 0xFF, as in the manual's write example
+		constexpr uint8_t NOT_SET_VALUE = 0xFF;
+
+		// Set all values to the "not set" value.
+		// We'll then assign the values being written.
+		memset(frame, NOT_SET_VALUE, F_SETTING_FRAME0_SIZE);
+
+		frame[F_SETTING_FRAME0_FRAME_HEADER_INDEX] = F_SETTING_FRAME0_FRAME_HEADER;
+		frame[F_SETTING_FRAME0_FUNCTION_MARK_INDEX] = F_SETTING_FRAME0_FUNCTION_MARK;
+		frame[F_SETTING_FRAME0_MIX_INDEX] = 0; // MIX_BIT_MIX clear: a write
+		frame[F_SETTING_FRAME0_ID_INDEX] = settings.id;
+		frame[F_SETTING_FRAME0_MODE_INDEX] = settings.mode;
+		packField<uint32_t>(frame, F_SETTING_FRAME0_UART_BAUDRATE_INDEX, settings.uartBaudRate, 3); // uint24 in the frame
+		packField<uint16_t>(frame, F_SETTING_FRAME0_BAND_START_INDEX, settings.bandStart);
+		packField<uint16_t>(frame, F_SETTING_FRAME0_BAND_WIDTH_INDEX, settings.bandWidth);
+		packField<uint16_t>(frame, F_SETTING_FRAME0_REFRESH_RATE_INDEX, settings.refreshRate);
+		frame[F_SETTING_FRAME0_FILTER_FACTOR_INDEX] = settings.filterFactor;
+		frame[F_SETTING_FRAME0_SUM_CHECK_INDEX] = calcSumCheck(frame, F_SETTING_FRAME0_SIZE, F_SETTING_FRAME0_SUM_CHECK_INDEX);
+	}
+
 	/// @brief Populate a request to read the device's settings, as an NLink_TOFSense_F_Setting_Frame0
 	/// @param request Receives the request
-	static void populateSettingsRequest(uint8_t (&request)[F_SETTING_FRAME0_SIZE])
+	static void populateSettingsRequestFrame(uint8_t (&request)[F_SETTING_FRAME0_SIZE])
 	{
 		// HARDWARE CHECK NEEDED: the manual only shows a settings write, so this read request is unconfirmed.
 		// Check the device replies to it.
@@ -188,14 +292,14 @@ protected:
 
 		request[F_SETTING_FRAME0_FRAME_HEADER_INDEX] = F_SETTING_FRAME0_FRAME_HEADER;
 		request[F_SETTING_FRAME0_FUNCTION_MARK_INDEX] = F_SETTING_FRAME0_FUNCTION_MARK;
-		request[F_SETTING_FRAME0_MIX_INDEX] = MIX_READ;
+		request[F_SETTING_FRAME0_MIX_INDEX] = MIX_BIT_MIX;
 		request[F_SETTING_FRAME0_ID_INDEX] = FACTORY_ID;
 		request[F_SETTING_FRAME0_SUM_CHECK_INDEX] = calcSumCheck(request, F_SETTING_FRAME0_SIZE, F_SETTING_FRAME0_SUM_CHECK_INDEX);
 	}
 
 	/// @brief Populate a request for one measurement, as an NLink_TOFSense_Read_Frame0
 	/// @param request Receives the request
-	static void populateMeasurementRequest(uint8_t (&request)[READ_FRAME0_SIZE])
+	static void populateMeasurementRequestFrame(uint8_t (&request)[READ_FRAME0_SIZE])
 	{
 		// Set all values to the reserved value.
 		// We'll then assign the values needed to request a measurement.
@@ -213,12 +317,12 @@ protected:
 	static Measurement parseMeasurement(const uint8_t (&frame)[FRAME0_SIZE])
 	{
 		Measurement measurement;
-		measurement.id = parseField<uint8_t>(frame, FRAME0_ID_INDEX);
-		measurement.systemTime = parseField<uint32_t>(frame, FRAME0_SYSTEM_TIME_INDEX);
-		measurement.distance = parseField<uint32_t>(frame, FRAME0_DIS_INDEX, 3); // uint24 in the frame
-		measurement.distanceStatus = parseField<uint8_t>(frame, FRAME0_DIS_STATUS_INDEX);
-		measurement.signalStrength = parseField<uint16_t>(frame, FRAME0_SIGNAL_STRENGTH_INDEX);
-		measurement.rangePrecision = parseField<uint8_t>(frame, FRAME0_RANGE_PRECISION_INDEX);
+		measurement.id = unpackField<uint8_t>(frame, FRAME0_ID_INDEX);
+		measurement.systemTime = unpackField<uint32_t>(frame, FRAME0_SYSTEM_TIME_INDEX);
+		measurement.distance = unpackField<uint32_t>(frame, FRAME0_DIS_INDEX, 3); // uint24 in the frame
+		measurement.distanceStatus = unpackField<uint8_t>(frame, FRAME0_DIS_STATUS_INDEX);
+		measurement.signalStrength = unpackField<uint16_t>(frame, FRAME0_SIGNAL_STRENGTH_INDEX);
+		measurement.rangePrecision = unpackField<uint8_t>(frame, FRAME0_RANGE_PRECISION_INDEX);
 
 		return measurement;
 	}
@@ -229,14 +333,14 @@ protected:
 	static Settings parseSettings(const uint8_t (&frame)[F_SETTING_FRAME0_SIZE])
 	{
 		Settings settings;
-		settings.id = parseField<uint8_t>(frame, F_SETTING_FRAME0_ID_INDEX);
-		settings.systemTime = parseField<uint32_t>(frame, F_SETTING_FRAME0_SYSTEM_TIME_INDEX);
-		settings.mode = parseField<uint8_t>(frame, F_SETTING_FRAME0_MODE_INDEX);
-		settings.uartBaudRate = parseField<uint32_t>(frame, F_SETTING_FRAME0_UART_BAUDRATE_INDEX, 3); // uint24 in the frame
-		settings.bandStart = parseField<uint16_t>(frame, F_SETTING_FRAME0_BAND_START_INDEX);
-		settings.bandWidth = parseField<uint16_t>(frame, F_SETTING_FRAME0_BAND_WIDTH_INDEX);
-		settings.refreshRate = parseField<uint16_t>(frame, F_SETTING_FRAME0_REFRESH_RATE_INDEX);
-		settings.filterFactor = parseField<uint8_t>(frame, F_SETTING_FRAME0_FILTER_FACTOR_INDEX);
+		settings.id = unpackField<uint8_t>(frame, F_SETTING_FRAME0_ID_INDEX);
+		settings.systemTime = unpackField<uint32_t>(frame, F_SETTING_FRAME0_SYSTEM_TIME_INDEX);
+		settings.mode = unpackField<uint8_t>(frame, F_SETTING_FRAME0_MODE_INDEX);
+		settings.uartBaudRate = unpackField<uint32_t>(frame, F_SETTING_FRAME0_UART_BAUDRATE_INDEX, 3); // uint24 in the frame
+		settings.bandStart = unpackField<uint16_t>(frame, F_SETTING_FRAME0_BAND_START_INDEX);
+		settings.bandWidth = unpackField<uint16_t>(frame, F_SETTING_FRAME0_BAND_WIDTH_INDEX);
+		settings.refreshRate = unpackField<uint16_t>(frame, F_SETTING_FRAME0_REFRESH_RATE_INDEX);
+		settings.filterFactor = unpackField<uint8_t>(frame, F_SETTING_FRAME0_FILTER_FACTOR_INDEX);
 
 		return settings;
 	}
@@ -370,9 +474,26 @@ protected:
 	bool requestSettings()
 	{
 		uint8_t request[F_SETTING_FRAME0_SIZE];
-		populateSettingsRequest(request);
+		populateSettingsRequestFrame(request);
 
 		return writeBytes(request, F_SETTING_FRAME0_SIZE);
+	}
+
+	/// @brief Write the device's settings
+	/// @param settings The settings to write. Every field is written, so they should come from a read
+	/// @return True if the write was sent
+	bool writeSettings(const Settings &settings)
+	{
+		uint8_t frame[F_SETTING_FRAME0_SIZE];
+		populateSettingsFrame(frame, settings);
+
+		if (!writeBytes(frame, F_SETTING_FRAME0_SIZE))
+			return false;
+
+		// The write has to be transmitted, and the device has to apply it, before it's sent anything else
+		delayMicroseconds(calcTransmitMicros(F_SETTING_FRAME0_SIZE, _baudRate) + DEVICE_PROCESSING_MICROS);
+
+		return true;
 	}
 
 	/// @brief Send the device a request for one measurement, which it sends back as an NLink_TOFSense_Frame0
@@ -380,9 +501,31 @@ protected:
 	bool requestMeasurement()
 	{
 		uint8_t request[READ_FRAME0_SIZE];
-		populateMeasurementRequest(request);
+		populateMeasurementRequestFrame(request);
 
 		return writeBytes(request, READ_FRAME0_SIZE);
+	}
+
+	/// @brief Initialise the output mode and refresh rate from the device. The device keeps its settings, so
+	/// @brief they may not be the ones it was supplied with
+	/// @return True if the device's settings were read
+	bool initialiseSettings()
+	{
+		_outputMode = OutputMode::Unknown;
+		_refreshRate = RefreshRate::Unknown;
+
+		Settings settings;
+		if (!readSettings(settings))
+			return false;
+
+		if ((settings.mode & MODE_BIT_OUTPUT_MODE) == 0)
+			_outputMode = OutputMode::Continuous;
+		else
+			_outputMode = OutputMode::Request;
+
+		_refreshRate = toRefreshRate(settings.refreshRate);
+
+		return true;
 	}
 
 	/// @brief Only created as part of a derived version
@@ -460,15 +603,77 @@ public:
 		return true;
 	}
 
-	/// @brief Set how the device sends measurements
-	/// @brief TODO: not yet implemented, so this always returns false and the mode stays Continuous
+	/// @brief Set how the device sends measurements. The device's other settings are kept, as they're read first
+	/// @brief and written back unchanged
 	/// @param mode The output mode
-	/// @return True if the mode was set
-	bool virtual setOutputMode(const OutputMode /* mode */)
+	/// @return True if the write was sent
+	bool virtual setOutputMode(const OutputMode mode)
 	{
-		// TODO: write the output mode to the device (bit1 of the settings frame's mode byte, by read-modify-write) once
-		// the hardware has confirmed the mode byte's layout. Until then, the mode can't be changed
-		return false;
+		// The device can only be set to a known mode
+		if (mode == OutputMode::Unknown)
+			return false;
+
+		Settings settings;
+		if (!readSettings(settings))
+			return false;
+
+		settings.mode = applyOutputMode(settings.mode, mode);
+
+		if (!writeSettings(settings))
+			return false;
+
+		_outputMode = mode;
+		return true;
+	}
+
+	/// @brief Set how often the device takes a measurement. The device's other settings are kept, as they're
+	/// @brief read first and written back unchanged
+	/// @param rate The refresh rate
+	/// @return True if the write was sent
+	bool setRefreshRate(const RefreshRate rate)
+	{
+		// The device can only be set to a known rate
+		if (rate == RefreshRate::Unknown)
+			return false;
+
+		Settings settings;
+		if (!readSettings(settings))
+			return false;
+
+		settings.refreshRate = static_cast<uint16_t>(rate);
+
+		if (!writeSettings(settings))
+			return false;
+
+		_refreshRate = rate;
+		return true;
+	}
+
+	/// @brief Set up the device in one call, with a single settings write. The defaults are the settings the
+	/// @brief device is supplied with
+	/// @tparam OUTPUT_MODE How the device sends measurements (default Continuous)
+	/// @tparam REFRESH_RATE How often the device takes a measurement (default 50 Hz)
+	/// @return True if the write was sent
+	template <OutputMode OUTPUT_MODE = OutputMode::Continuous,
+			  RefreshRate REFRESH_RATE = RefreshRate::Rate_50Hz>
+	bool quickSetup()
+	{
+		static_assert(OUTPUT_MODE != OutputMode::Unknown, "The output mode must be a known mode");
+		static_assert(REFRESH_RATE != RefreshRate::Unknown, "The refresh rate must be a known rate");
+
+		Settings settings;
+		if (!readSettings(settings))
+			return false;
+
+		settings.mode = applyOutputMode(settings.mode, OUTPUT_MODE);
+		settings.refreshRate = static_cast<uint16_t>(REFRESH_RATE);
+
+		if (!writeSettings(settings))
+			return false;
+
+		_outputMode = OUTPUT_MODE;
+		_refreshRate = REFRESH_RATE;
+		return true;
 	}
 
 	void disableAutoChecker()
@@ -502,6 +707,10 @@ public:
 
 	void checkDistance()
 	{
+		// A measurement can only be read once the device's output mode is known
+		if (_outputMode == OutputMode::Unknown)
+			return;
+
 		if (_checkDistanceRequired)
 		{
 			Measurement measurement;
@@ -514,5 +723,19 @@ public:
 
 			_checkDistanceRequired = false;
 		}
+	}
+
+	/// @brief Get how the device sends measurements
+	/// @return The output mode
+	OutputMode getOutputMode() const
+	{
+		return _outputMode;
+	}
+
+	/// @brief Get how often the device takes a measurement
+	/// @return The refresh rate
+	RefreshRate getRefreshRate() const
+	{
+		return _refreshRate;
 	}
 };

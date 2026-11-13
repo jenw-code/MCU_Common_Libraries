@@ -97,9 +97,7 @@ protected:
 		if ((_dmaRX.baudRate != static_cast<uint32_t>(BAUD_RATE)) || (_tx.baudRate != static_cast<uint32_t>(BAUD_RATE)))
 			return false;
 
-		Settings settings;
-
-		return readSettings(settings); // Read settings - this confirms the device is running
+		return initialiseSettings(); // Initialising the settings also confirms the device is running
 	}
 
 public:
