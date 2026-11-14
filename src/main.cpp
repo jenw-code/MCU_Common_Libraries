@@ -6,11 +6,68 @@
 #include "tof_laser_range_mini_uart.h"
 #include "rp235x_tof_laser_range_mini_uart_dma.h"
 
+RP235x_TOF_Laser_Range_Mini_UART_DMA<UART_Master::BaudRate::Baud921600> *lidar1 = nullptr;
+
+void lidarCallback(TOF_Laser_Range_Mini & /* sender */, const uint32_t distance)
+{
+	logValue("MIN DISTANCE CALLBACK. DISTANCE = ", distance);
+}
+
+constexpr uint16_t LIDAR_BUFFER_SIZE = 64;
+constexpr uint16_t LIDAR_DMA_RING_SIZE = 64;
+
+// The DMA wraps its write address on a boundary of the ring's size, so the ring is aligned to it
+alignas(LIDAR_DMA_RING_SIZE) volatile uint8_t lidar1_DMARing[LIDAR_DMA_RING_SIZE] = {};
+
+bool setupLidar()
+{
+	constexpr RP235x_PIO_UART_Config RX_CONFIG = {
+		.pioIndex = 0,
+		.stateMachine = 0,
+		.pin = D3,
+		.baudRate = UART_Master::BaudRate::Baud921600,
+	};
+
+	constexpr RP235x_PIO_UART_Config TX_CONFIG = {
+		.pioIndex = 0,
+		.stateMachine = 1,
+		.pin = D2,
+		.baudRate = UART_Master::BaudRate::Baud921600,
+	};
+
+	constexpr RP235x_UART_DMA_RX_Ring_Config<LIDAR_BUFFER_SIZE> LIDAR1_DMA_CONFIG = {
+		.channel = 0,
+	};
+
+	RP235x_UART_RX rx = {};
+	RP235x_UART_TX tx = {};
+	RP235x_UART_DMA_RX_Ring<LIDAR_BUFFER_SIZE> dmaRX = {};
+
+	if (RP235x_PIO_UART::setup_RX(RX_CONFIG, rx) &&
+		RP235x_PIO_UART::setup_TX(TX_CONFIG, tx) &&
+		RP235x_UART_DMA::setup_RX(LIDAR1_DMA_CONFIG, rx, lidar1_DMARing, dmaRX))
+	{
+		lidar1 = new RP235x_TOF_Laser_Range_Mini_UART_DMA<UART_Master::BaudRate::Baud921600, LIDAR_DMA_RING_SIZE>(dmaRX, tx);
+		if (lidar1->begin())
+		{
+			logStr("setupLidar Success");
+
+			lidar1->enableAutoChecker(200, 100, lidarCallback);
+			return true;
+		}
+	}
+
+	logStr("setupLidar Fail");
+
+	return false;
+}
+
 //---------------------------------------- MESSENGER UNDER TEST ------------------------------------
 // The only MCU-specific part. To test another MCU's comms, replace this section
 
 // TEST - temporary: the Pico 2 has no PSRAM, so setup should fail
 using CommsClass = RP235x_Data_Messenger_Comms<RP235x_PIO_UART_Config, RP235x_UART_Config, false>;
+
 /// @brief The test's message types. The link is looped back, so each end sends and receives the same types
 enum class Test_Message_Type : uint8_t
 {
@@ -54,71 +111,7 @@ constexpr CommsClass::UART_Config COMMS_CONFIG = {
 CommsClass commsUnderTest(COMMS_CONFIG);
 MessengerClass messengerUnderTest(commsUnderTest);
 
-RP235x_TOF_Laser_Range_Mini_UART_DMA<UART_Master::BaudRate::Baud921600> *lidar1 = nullptr;
-
-void lidarCallback(TOF_Laser_Range_Mini & /* sender */, const uint32_t distance)
-{
-	logValue("MIN DISTANCE CALLBACK. DISTANCE = ", distance);
-}
-
-constexpr uint16_t LIDAR_BUFFER_SIZE = 64;
-constexpr uint16_t LIDAR_DMA_RING_SIZE = 64;
-
-// The DMA wraps its write address on a boundary of the ring's size, so the ring is aligned to it
-alignas(LIDAR_DMA_RING_SIZE) volatile uint8_t lidar1_DMARing[LIDAR_DMA_RING_SIZE] = {};
-
-bool setupLidar1()
-{
-	constexpr RP235x_PIO_UART_Config RX_CONFIG = {
-		.pioIndex = 0,
-		.stateMachine = 0,
-		.pin = D3,
-		.baudRate = UART_Master::BaudRate::Baud921600,
-	};
-
-	constexpr RP235x_PIO_UART_Config TX_CONFIG = {
-		.pioIndex = 0,
-		.stateMachine = 1,
-		.pin = D2,
-		.baudRate = UART_Master::BaudRate::Baud921600,
-	};
-
-	RP235x_UART_RX rx = {};
-	RP235x_UART_TX tx = {};
-
-	RP235x_UART_DMA_RX_Ring_Config<LIDAR_BUFFER_SIZE> LIDAR1_DMA_CONFIG = {.channel = 0};
-	RP235x_UART_DMA_RX_Ring<LIDAR_BUFFER_SIZE> dmaRX = {};
-
-	if (!RP235x_PIO_UART::setup_RX(RX_CONFIG, rx))
-	{
-		logStr("setup_RX");
-		return false;
-	}
-
-	if (!RP235x_PIO_UART::setup_TX(TX_CONFIG, tx))
-	{
-		logStr("setup_TX");
-		return false;
-	}
-
-	if (RP235x_UART_DMA::setup_RX(LIDAR1_DMA_CONFIG, rx, lidar1_DMARing, dmaRX))
-	{
-		lidar1 = new RP235x_TOF_Laser_Range_Mini_UART_DMA<UART_Master::BaudRate::Baud921600, LIDAR_DMA_RING_SIZE>(dmaRX, tx);
-		if (lidar1->begin())
-		{
-			logStr("setupLidar1 Success");
-
-			lidar1->enableAutoChecker(200, 100, lidarCallback);
-			return true;
-		}
-	}
-
-	logStr("setupLidar1 Fail");
-
-	return false;
-}
-
-//---------------------------------------- TEST PAYLOAD --------------------------------------------
+//------------------------------------ MESSENGER TEST PAYLOAD --------------------------------------
 
 // The largest payload Data_Messenger accepts (its MAX_TWO_STEP_PAYLOAD_SIZE)
 constexpr uint32_t MAX_PAYLOAD_SIZE = 20 * 1024;
@@ -160,7 +153,7 @@ bool payloadMatchesPattern(const uint8_t *payload, const uint32_t size)
 	return true;
 }
 
-//---------------------------------------- CALLBACKS -----------------------------------------------
+//----------------------------------- MESSENGER CALLBACKS ------------------------------------------
 
 /// @brief What the callbacks have seen since the record was last reset
 struct Callback_Record final
@@ -258,7 +251,7 @@ void runTest(const char *name, bool (*test)(MessengerClass &), MessengerClass &m
 		logStr("FAIL");
 }
 
-//---------------------------------------- TESTS: SETUP AND SEND VALIDATION ------------------------
+//-------------------------------- TESTS: SETUP AND SEND VALIDATION --------------------------------
 // Run before the messenger is set up: each is rejected before any hardware is touched
 
 /// @brief Test 1: setup without a receive callback fails
@@ -280,7 +273,7 @@ bool testSendOverMaxPayload(MessengerClass &messenger)
 	return !sent;
 }
 
-//---------------------------------------- TESTS: NORMAL MESSAGES ----------------------------------
+//---------------------------------- TESTS: NORMAL MESSAGES ----------------------------------------
 
 /// @brief Test 4: a message type with no payload
 /// @param messenger The messenger, looped back so it receives what it sends
@@ -347,7 +340,7 @@ bool testSeveralInARow(MessengerClass &messenger)
 	return allPassed;
 }
 
-//---------------------------------------- TESTS: DROPS AND RECOVERING SYNC ------------------------
+//---------------------------------- TESTS: DROPS AND RECOVERING SYNC ------------------------------
 // Each sends a second message before checkForMessages has handled the first, so the second is dropped
 
 /// @brief Test 14: a one-step message arriving before the last one is handled is dropped, and the first is still
@@ -421,7 +414,7 @@ bool testUnknownMessageType(MessengerClass &messenger)
 	return sent && notDelivered && unknownReported;
 }
 
-//---------------------------------------- PERFORMANCE ---------------------------------------------
+//-------------------------------------------- PERFORMANCE -----------------------------------------
 
 /// @brief Measure how long send takes for one-step and two-step messages, and print the results. Printed with
 /// @brief Serial directly, so it works with APP_DEBUG at 0, which keeps the messenger's logging out of the times
@@ -507,7 +500,7 @@ void testMessenger()
 	logValue("Tests passed = ", testsPassed);
 }
 
-//---------------------------------------- SETUP ---------------------------------------------------
+//----------------------------------------------- SETUP --------------------------------------------
 
 void setup()
 {
@@ -520,7 +513,7 @@ void setup()
 
 	// testMessenger();
 
-	setupLidar1();
+	setupLidar();
 }
 
 //---------------------------------------- LOOP ----------------------------------------------------
