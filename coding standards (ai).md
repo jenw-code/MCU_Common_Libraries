@@ -4,7 +4,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 
 ## The master rule: code must show intent
 
-**KISS: keep it simple, stupid.** Read the code cold, without context. If it only makes sense with an explanation, it isn't clear yet. Clarity and efficiency are the goals; "less code" and compactness never are. Clear code often ends up smaller, but as a result of clarity, never as the aim.
+**KISS: keep it simple, stupid.** Read the code cold, without context. If it only makes sense with an explanation, it isn't clear yet. Clarity and efficiency are the goals; "less code" and compactness never are. Clear code often ends up smaller, but as a result of clarity, never as the aim. Think small and grow: start from the simplest thing that could work, and add only what's needed. A solution that starts complicated rarely ends up simple. Match the solution to its permanence: test code and one-off checks don't need production structure.
 
 1. **Comments explain intent, never functionality.** The code shows what it does; a comment gives the real reason a line exists. No side effect given as the reason, no obvious purpose. If a name already shows the intent, no comment. Plain English, wrapped at about 85 characters.
 2. **Density of logic.** Don't pack several pieces of logic into one expression; give each its own simple, named step. A single guard with one outcome is fine. But don't name a value that's only used once, directly below: a `bool` set and then tested on the next line adds a name without adding meaning, so the condition goes straight in the `if`.
@@ -21,6 +21,11 @@ The coding standards Claude works to on every project: the standing rules, follo
 13. **Where a validation goes:** next to the shared declaration if several functions rely on it, otherwise first in the function that relies on it. Never act and then check. Validate once, at the entry point; don't guard what's already guaranteed.
 14. **Never do work that can't ever be used.**
 16. **The code's shape mirrors its intent.** Write it the way you'd explain it: "if the CRC is wrong, report it; otherwise, if the type is unknown, report that; otherwise, deliver the message" becomes exactly that chain. If the code's shape tells a different story (for example, working out every check up front when the first failure stops everything), the intent is lost, however correct the result. Where the code can't easily show its intent, a comment states it. Show the logic clearly even where it may be disagreed with: clear logic can be discussed and corrected, but hidden logic can't.
+17. **On mirrors off.** Paired actions (setup and teardown, start and stop) mirror each other: whatever state one sets, the other clears, and in the matching place. A value set on the way in but left alone on the way out reads as an oversight.
+18. **The same kind of work happens at the same level.** If the public functions update shared state, the helpers don't update any of it (and vice versa). Consistency gives each function a clear definition of what it does.
+19. **Decide each function's responsibility before writing it.** Work out which function owns which state and which hardware action, and check the split against "on mirrors off" and "same work at the same level". Patching responsibilities one at a time, as problems show up, ends in a mess.
+- **Use an `else if` instead of nesting an `if` in a branch.** The `else` already says the previous condition was false, so a separate nested block adds depth without adding meaning.
+20. **Name a parameter for what it means to the function receiving it,** not for where the caller got it. A helper that starts a UART cares whether the UART is already running, not whether "the other direction" is in use.
 15. **Don't be lazy with headers.** Every function documents every `@param` and `@tparam` (what it is, units, range), whatever its scope.
 
 ## C++ / embedded library conventions (PlatformIO Arduino, 32-bit MCUs)
@@ -70,6 +75,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **A new enum value goes where it logically fits**, not simply at the end. For example, errors are ordered as they can occur, so a new one sits beside the errors detected at the same stage. An unknown state always goes first.
 - **Type names have no `_t` suffix**, whether class, struct, enum or template parameter. The exception is an alias of a type that already ends in `_t` (for example `using Distance_t = uint32_t;`).
 - **A yes/no choice is a clearly named `bool`, not a two-value enum** (e.g. `TWO_STEP_PAYLOAD_IN_PSRAM`). Use an enum only when there are more than two options, or the two options aren't a yes and a no.
+- **Enums constrain public interfaces; internal state can be a plain value.** An enum protects a caller choosing a setting. A value kept only for an internal check (e.g. "are these two the same?") gains little from being an enum, and a plain value can have a natural "none" (0) without adding `Unknown` to a shared enum.
 - **Read names as a stranger would.** A name that needs explaining isn't right yet. A size is named in the unit a reader expects (bytes, not a power-of-two exponent).- **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".
 
 ### Comments and headers
