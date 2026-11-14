@@ -75,6 +75,8 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **A new enum value goes where it logically fits**, not simply at the end. For example, errors are ordered as they can occur, so a new one sits beside the errors detected at the same stage. An unknown state always goes first.
 - **Type names have no `_t` suffix**, whether class, struct, enum or template parameter. The exception is an alias of a type that already ends in `_t` (for example `using Distance_t = uint32_t;`).
 - **A yes/no choice is a clearly named `bool`, not a two-value enum** (e.g. `TWO_STEP_PAYLOAD_IN_PSRAM`). Use an enum only when there are more than two options, or the two options aren't a yes and a no.
+- **A generic class names only what it relies on, never how its parts provide it.** If a driver's code and comments mention its engine's mechanism (DMA, UART), either the driver depends on it or the wording is wrong. Removing such mentions is a good test of whether the class is really generic.
+- **A state enum describes one thing's lifecycle.** Name it after that thing, and give it only that thing's states: a receive state never includes a sending value. Read cold, `Message_State::Sending` in a receiver's enum mixes two directions.
 - **Enums constrain public interfaces; internal state can be a plain value.** An enum protects a caller choosing a setting. A value kept only for an internal check (e.g. "are these two the same?") gains little from being an enum, and a plain value can have a natural "none" (0) without adding `Unknown` to a shared enum.
 - **Read names as a stranger would.** A name that needs explaining isn't right yet. A size is named in the unit a reader expects (bytes, not a power-of-two exponent).- **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".
 
@@ -91,7 +93,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Identical lines get identical comments.**
 - **A very pertinent, subtle point starts with "Note:"** to draw the developer's eye to it. Kept for those points only, so it keeps its weight.
 - **Code doesn't explain the schematic.** Circuit details, such as an external pull-up on a pin, belong in the hardware design, not in comments on the code that uses them.
-- **Each line of a multi-line brief starts with its own `/// @brief`.**
+- **Each line of a multi-line brief starts with its own `/// @brief`.** Only briefs: a wrapped `@param`, `@tparam` or `@return` continues on a plain `///` line, as a `@brief` there would start a new brief.
 
 ### Writing code
 - **Write conditions positively, in the terms of the intent.** Name every accepted case, so the check fails closed, rather than rejecting the wrong cases, which fails open.
