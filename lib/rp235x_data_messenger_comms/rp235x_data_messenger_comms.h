@@ -133,9 +133,14 @@ public:
 	}
 
 	/// @brief Set up the FL pins, then the UARTs and DMAs that send and receive
-	/// @return True if set up, false if PSRAM is needed but not fitted, or a UART or a DMA channel can't be set up
+	/// @return True if set up, false if the RX and TX baud rates differ, PSRAM is needed but not fitted, or a UART or a
+	/// DMA channel can't be set up
 	bool setup()
 	{
+		// The link runs at one baud rate in both directions
+		if (_uartConfig.uartRX.baudRate != _uartConfig.uartTX.baudRate)
+			return false;
+
 		// The two-step payload buffer is reserved in PSRAM, so it must be fitted
 		if constexpr (TWO_STEP_PAYLOAD_IN_PSRAM)
 		{
