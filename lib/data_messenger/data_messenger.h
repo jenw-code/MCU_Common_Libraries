@@ -16,16 +16,19 @@ public:
 	static constexpr decltype(HIGH) FRAME_NOT_SENDING_STATUS = HIGH;
 };
 
-/// @brief Used to organise transmitting and receiving data from one mcu to another over UART (using DMA). It
+/// @brief Used to organise transmitting and receiving data from one mcu to another over a serial link. It
 /// @brief decides when everything happens; its comms knows how to do it on its MCU
-/// @tparam Comms The MCU's comms (e.g. RP235x_Data_Messenger_Comms). It must provide: setup, sendBytes,
-/// @brief waitForTXIdle, startReceiveBytes, stopReceiveBytes, clearRXFIFO, startSendFrame, stopSendFrame, frameSending,
-/// @brief attachReceiveFrameInterrupt, reservePayloadBuffer and releasePayloadBuffer
+/// @tparam Comms The MCU's comms (e.g. RP235x_Data_Messenger_Comms): the MCU-specific part that carries out what
+/// 		the messenger decides. It sends and receives bytes over its serial link in the background, signals and watches
+///			the FL lines, and reserves the payload buffer, so the messenger itself works unchanged on any MCU
 /// @tparam Send_Message_Type The enum of message types this end sends: enum class with a uint8_t underlying
-/// @brief type, and MIN and MAX values aliasing its first and last types
+/// 		type, and MIN and MAX values aliasing its first and last types
 /// @tparam Receive_Message_Type The enum of message types this end receives, in the same form. Received types
-/// @brief outside MIN to MAX are reported as UnknownMessageType
-template <typename Comms, typename Send_Message_Type, typename Receive_Message_Type>
+/// 		outside MIN to MAX are reported as UnknownMessageType
+/// @tparam MAX_TWO_STEP_PAYLOAD_SIZE The largest payload this end sends or receives (bytes). It must be larger than
+/// 		the largest one-step payload. The receive buffer is reserved at this size. The default is 1 KB
+template <typename Comms, typename Send_Message_Type, typename Receive_Message_Type,
+		  uint32_t MAX_TWO_STEP_PAYLOAD_SIZE = 1024>
 class Data_Messenger
 {
 public:
@@ -48,7 +51,7 @@ public:
 										const uint32_t payloadSize);
 
 private:
-	static constexpr uint8_t DMA_BUFFER_SIZE = 64;
+	static constexpr uint8_t FRAME_BUFFER_SIZE = 64;
 	static constexpr uint8_t HEADER_SIZE = 6; // HEADER_START_BYTE, message type, BUFFER_SIZE (4 bytes);
 	static constexpr uint8_t CRC32_SIZE = 4;
 
@@ -66,10 +69,10 @@ private:
 	static_assert(sizeof(Receive_Message_Type) == sizeof(uint8_t), "Receive message types must be a uint8_t enum");
 
 	// Calc max buffer size that allows us to send the entire message in one step
-	static constexpr uint8_t MAX_ONE_STEP_PAYLOAD_SIZE = DMA_BUFFER_SIZE - (HEADER_SIZE + CRC32_SIZE);
+	static constexpr uint8_t MAX_ONE_STEP_PAYLOAD_SIZE = FRAME_BUFFER_SIZE - (HEADER_SIZE + CRC32_SIZE);
 
-	// The max payload size that can be received
-	static constexpr uint16_t MAX_TWO_STEP_PAYLOAD_SIZE = 20 * 1024;
+	// A payload too big for one step is sent in two, so the two-step limit must be above the one-step one
+	static_assert(MAX_TWO_STEP_PAYLOAD_SIZE > MAX_ONE_STEP_PAYLOAD_SIZE, "The largest two-step payload must be larger than the largest one-step payload");
 
 	static constexpr uint8_t HEADER_START_BYTE = 0b10101010;
 
@@ -85,14 +88,14 @@ private:
 	/// @brief Permanent received message buffers
 	struct RX_Message_Buffers final
 	{
-		uint8_t oneStepBuffer[DMA_BUFFER_SIZE] = {}; // Permanent memory, reused for every message
-		uint8_t *twoStepPayloadBuffer = nullptr;	 // Permanent memory, reserved once and reused for every message
+		uint8_t oneStepBuffer[FRAME_BUFFER_SIZE] = {}; // Permanent memory, reused for every message
+		uint8_t *twoStepPayloadBuffer = nullptr;	   // Permanent memory, reserved once and reused for every message
 	};
 
 	/// @brief Permanent sending message buffer
 	struct TX_Message_Buffer final
 	{
-		uint8_t buffer[DMA_BUFFER_SIZE] = {}; // Permanent memory, reused for every message
+		uint8_t buffer[FRAME_BUFFER_SIZE] = {}; // Permanent memory, reused for every message
 	};
 
 	Comms &_comms;
@@ -108,7 +111,7 @@ private:
 	RX_Message_Buffers _receivedMessage = {};
 	TX_Message_Buffer _messageToSend = {};
 
-	uint8_t _frameBuffer[DMA_BUFFER_SIZE] = {};
+	uint8_t _frameBuffer[FRAME_BUFFER_SIZE] = {};
 
 	// Only used by the receiving FL line's interrupt, so it isn't volatile. If anything else needs it, make it volatile
 	Expected_Frame _expectedFrame = Expected_Frame::NewMessage;
@@ -181,7 +184,7 @@ private:
 			_errorCallback(error);
 	}
 
-	/// @brief Send a message (header and payload) small enough for the receiver's DMA buffer as one frame.
+	/// @brief Send a message (header and payload) small enough for the receiver's frame buffer as one frame.
 	/// @brief A CRC is also appended to the end of the message to help validate the data was sent successfully
 	/// @param messageType The message's type
 	/// @param payload The payload's bytes
@@ -189,7 +192,7 @@ private:
 	/// @return True if sending started
 	bool sendOneStep(const Send_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
 	{
-		// Built in permanent memory, not a local array: the DMA is still reading it after
+		// Built in permanent memory, not a local array: the comms is still sending from it after
 		// this function returns, when a local array's memory would already be reused
 		uint8_t *bytes = _messageToSend.buffer;
 		bytes[HEADER_START_BYTE_INDEX] = HEADER_START_BYTE;
@@ -209,7 +212,7 @@ private:
 		return _comms.sendBytes(bytes, headerAndPayloadSize + CRC32_SIZE);
 	}
 
-	/// @brief Send a message too big for the receiver's DMA buffer as two frames: the header, then the payload.
+	/// @brief Send a message too big for the receiver's frame buffer as two frames: the header, then the payload.
 	/// @brief A CRC is also appended to the end of the message to help validate the data was sent successfully
 	/// @param messageType The message's type
 	/// @param payload The payload's bytes. They must stay unchanged until the comms' waitForTXIdle returns
@@ -217,8 +220,8 @@ private:
 	/// @return True if every part was sent or started
 	bool sendTwoStep(const Send_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
 	{
-		// Built in permanent memory, not a local array: the CRC placed in it below is still being read by
-		// the DMA after this function returns, when a local array's memory would already be reused
+		// Built in permanent memory, not a local array: the comms is still sending the CRC placed in it below
+		// after this function returns, when a local array's memory would already be reused
 		uint8_t *header = _messageToSend.buffer;
 		header[HEADER_START_BYTE_INDEX] = HEADER_START_BYTE;
 		header[MESSAGE_TYPE_INDEX] = static_cast<uint8_t>(messageType);
@@ -243,20 +246,20 @@ private:
 		uint8_t *crc32Bytes = &_messageToSend.buffer[HEADER_SIZE];
 		packUInt32(crc32Bytes, crc32);
 
-		// The payload's transfer must finish before the CRC's starts on the same DMA channel
+		// The comms sends one buffer at a time, so the payload must finish before the CRC starts
 		_comms.waitForTXIdle();
 		return _comms.sendBytes(crc32Bytes, CRC32_SIZE);
 	}
 
-	/// @brief Handle a frame starting or ending on the receiving FL line. Called from the line's interrupt, so it
-	/// @brief must be quick
+	/// @brief Handle a frame starting or ending on the receiving FL line.
+	/// @brief Called from the line's interrupt, so it must be quick
 	void handleReceiveFrameChange()
 	{
 		if (_comms.frameSending())
 		{
 			// Step 1: a frame is starting. A two-step payload's receive was started when its header frame ended
 			if (_expectedFrame == Expected_Frame::NewMessage)
-				_comms.startReceiveBytes(_frameBuffer, DMA_BUFFER_SIZE);
+				_comms.startReceiveBytes(_frameBuffer, FRAME_BUFFER_SIZE);
 		}
 		else
 		{
@@ -280,7 +283,7 @@ private:
 
 				else
 				{
-					memcpy(_receivedMessage.oneStepBuffer, _frameBuffer, DMA_BUFFER_SIZE);
+					memcpy(_receivedMessage.oneStepBuffer, _frameBuffer, FRAME_BUFFER_SIZE);
 
 					const uint32_t payloadSize = unpackUInt32(&_receivedMessage.oneStepBuffer[PAYLOAD_SIZE_INDEX]);
 					if (payloadSize <= MAX_ONE_STEP_PAYLOAD_SIZE)

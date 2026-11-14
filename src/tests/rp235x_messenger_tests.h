@@ -33,7 +33,10 @@ enum class Test_Message_Type : uint8_t
 	MAX = SendTimeMeasurement,
 };
 
-using MessengerClass = Data_Messenger<CommsClass, Test_Message_Type, Test_Message_Type>;
+// The largest payload the messenger under test accepts (its MAX_TWO_STEP_PAYLOAD_SIZE)
+constexpr uint32_t MAX_PAYLOAD_SIZE = 20 * 1024;
+
+using MessengerClass = Data_Messenger<CommsClass, Test_Message_Type, Test_Message_Type, MAX_PAYLOAD_SIZE>;
 
 // Looped back: TX (4) wired to RX (5), and the sending FL line (6) wired to the receiving one (7). TX and RX are
 // also UART 1's pins, so the same wiring serves the hardware UART links
@@ -58,9 +61,6 @@ CommsClass commsUnderTest(COMMS_CONFIG);
 MessengerClass messengerUnderTest(commsUnderTest);
 
 //------------------------------------ MESSENGER TEST PAYLOAD --------------------------------------
-
-// The largest payload Data_Messenger accepts (its MAX_TWO_STEP_PAYLOAD_SIZE)
-constexpr uint32_t MAX_PAYLOAD_SIZE = 20 * 1024;
 
 // The largest payload sent in one step: the 64-byte frame, less the 6-byte header and the 4-byte CRC
 constexpr uint32_t MAX_ONE_STEP_PAYLOAD_SIZE = 64 - (6 + 4);
