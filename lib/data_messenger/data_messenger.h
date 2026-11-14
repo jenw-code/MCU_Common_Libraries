@@ -16,6 +16,38 @@ public:
 	static constexpr decltype(HIGH) FRAME_NOT_SENDING_STATUS = HIGH;
 };
 
+/// @brief The standard CRC-32 lookup table: one entry for each value of a byte. Each entry is what processing its
+/// @brief byte value's 8 bits, one at a time, does to the CRC register, so a whole byte can be processed in one step
+/// @brief e.g. entry 1 is 0x77073096
+struct CRC32_Table final
+{
+	static constexpr uint16_t SIZE = 256;
+	uint32_t entries[SIZE] = {};
+
+	/// @brief Populate the table, at compile time when the table is constexpr
+	constexpr CRC32_Table()
+	{
+		// The polynomial 0x04C11DB7 reversed, as each byte is processed least significant bit first
+		constexpr uint32_t POLYNOMIAL = 0xEDB88320;
+
+		for (uint16_t byteValue = 0; byteValue < SIZE; ++byteValue)
+		{
+			uint32_t crc = byteValue;
+
+			for (uint8_t iBit = 0; iBit < 8; ++iBit)
+			{
+				const bool lowBitSet = ((crc & 1) != 0);
+				crc >>= 1;
+
+				if (lowBitSet)
+					crc ^= POLYNOMIAL;
+			}
+
+			entries[byteValue] = crc;
+		}
+	}
+};
+
 /// @brief Used to organise transmitting and receiving data from one mcu to another over a serial link. It
 /// @brief decides when everything happens; its comms knows how to do it on its MCU
 /// @tparam Comms The MCU's comms (e.g. RP235x_Data_Messenger_Comms): the MCU-specific part that carries out what
@@ -36,19 +68,24 @@ public:
 	enum class Error : uint8_t
 	{
 		None,					// No error since the last report
-		MessageDropped,			// A message arrived before the last one was handled
+		SendAsyncMessageFail,	// Async message failed to send
+		ReceivedMessageDropped, // A message arrived before the last one was handled
 		InvalidStartByte,		// A frame didn't start with a header
 		UnknownMessageType,		// The message's type is outside the receive message types' MIN to MAX
 		PayloadMaxSizeExceeded, // The header announced more than the largest payload that can be received
 		InvalidCRC,				// The message failed its CRC check
 	};
 
-	// Called with each error, from checkForMessages
+	// Called with each error, from process
 	typedef void (*On_Error_Callback)(const Error error);
 
 	// Called with each valid message received. payload is nullptr when payloadSize is 0
 	typedef void (*On_Receive_Callback)(const Receive_Message_Type messageType, const uint8_t *payload,
 										const uint32_t payloadSize);
+
+	// Called with each async sent message. payload is nullptr when payloadSize is 0
+	typedef void (*On_Sent_Callback)(const Send_Message_Type messageType, const uint8_t *payload,
+									 const uint32_t payloadSize);
 
 private:
 	static constexpr uint8_t FRAME_BUFFER_SIZE = 64;
@@ -78,6 +115,14 @@ private:
 
 	static constexpr uint16_t STEP_TRANSITION_DELAY_MICROS = 1000;
 
+	// Built at compile time, so it's held in flash
+	static constexpr CRC32_Table CRC32_TABLE = {};
+
+	// Both ends of a link share this table, so a wrong one would still pass every test between them. It's
+	// checked against the standard's published entries instead
+	static_assert(CRC32_TABLE.entries[1] == 0x77073096, "The CRC-32 table doesn't match the standard");
+	static_assert(CRC32_TABLE.entries[255] == 0x2D02EF8D, "The CRC-32 table doesn't match the standard");
+
 	/// @brief The frame the receiving FL line's next edges belong to
 	enum class Expected_Frame : uint8_t
 	{
@@ -98,11 +143,24 @@ private:
 		uint8_t buffer[FRAME_BUFFER_SIZE] = {}; // Permanent memory, reused for every message
 	};
 
+	/// @brief Async message being sent
+	struct TX_Message_Async final
+	{
+		bool twoStep = false;
+		Send_Message_Type messageType = Send_Message_Type::MIN;
+		const uint8_t *payload = nullptr;
+		uint32_t payloadSize = 0;
+		uint32_t headerCRC32 = 0;
+		On_Sent_Callback callback = nullptr;
+	};
+
 	Comms &_comms;
 
 	volatile bool _messageReceived = false;
 
-	// Set by the receiving FL line's interrupt, and reported by checkForMessages
+	TX_Message_Async _messageSendingAsync = {};
+
+	// Set by the receiving FL line's interrupt, and reported by process
 	volatile Error _lastError = Error::None;
 
 	On_Receive_Callback _receiveCallback = nullptr;
@@ -125,9 +183,6 @@ private:
 	/// @return The CRC of every byte so far
 	static uint32_t calcCRC32(const uint8_t *const bytes, const size_t size, const uint32_t prevCRC = 0)
 	{
-		// The polynomial 0x04C11DB7 reversed, as each byte is processed least significant bit first
-		constexpr uint32_t POLYNOMIAL = 0xEDB88320;
-
 		// The register starts inverted, so leading zero bytes still change the CRC, and
 		// ends inverted, as the standard specifies
 		constexpr uint32_t INVERT = 0xFFFFFFFF;
@@ -137,16 +192,9 @@ private:
 
 		for (size_t iByte = 0; iByte < size; ++iByte)
 		{
-			crc ^= bytes[iByte];
-
-			for (uint8_t iBit = 0; iBit < 8; ++iBit)
-			{
-				const bool lowBitSet = ((crc & 1) != 0);
-				crc >>= 1;
-
-				if (lowBitSet)
-					crc ^= POLYNOMIAL;
-			}
+			// The register's low byte, combined with the next byte, picks the entry that applies all 8 bits at once
+			const uint8_t tableIndex = static_cast<uint8_t>(crc ^ bytes[iByte]);
+			crc = (crc >> 8) ^ CRC32_TABLE.entries[tableIndex];
 		}
 
 		return crc ^ INVERT;
@@ -184,13 +232,24 @@ private:
 			_errorCallback(error);
 	}
 
+	/// @brief Report an async message as sent through its callback, if there is one
+	/// @param sentMessage The message that has been sent
+	void triggerSentCallback(const TX_Message_Async &sentMessage)
+	{
+		if (sentMessage.callback != nullptr)
+			sentMessage.callback(sentMessage.messageType, sentMessage.payload, sentMessage.payloadSize);
+	}
+
 	/// @brief Send a message (header and payload) small enough for the receiver's frame buffer as one frame.
 	/// @brief A CRC is also appended to the end of the message to help validate the data was sent successfully
 	/// @param messageType The message's type
 	/// @param payload The payload's bytes
 	/// @param payloadSize Number of payload bytes, up to MAX_ONE_STEP_PAYLOAD_SIZE
+	/// @param callback Called from process once an async send has been sent, or nullptr if the caller waits for it
 	/// @return True if sending started
-	bool sendOneStep(const Send_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
+	bool sendOneStep(const Send_Message_Type messageType,
+					 const uint8_t *payload, const uint32_t payloadSize,
+					 const On_Sent_Callback callback)
 	{
 		// Built in permanent memory, not a local array: the comms is still sending from it after
 		// this function returns, when a local array's memory would already be reused
@@ -209,16 +268,52 @@ private:
 		const uint32_t crc32 = calcCRC32(bytes, headerAndPayloadSize);
 		packUInt32(&bytes[headerAndPayloadSize], crc32);
 
-		return _comms.sendBytes(bytes, headerAndPayloadSize + CRC32_SIZE);
+		if (!_comms.sendBytes(bytes, headerAndPayloadSize + CRC32_SIZE))
+			return false;
+
+		if (callback != nullptr)
+		{
+			_messageSendingAsync.twoStep = false;
+			_messageSendingAsync.messageType = messageType;
+			_messageSendingAsync.payload = payload;
+			_messageSendingAsync.payloadSize = payloadSize;
+			_messageSendingAsync.callback = callback;
+		}
+
+		return true;
+	}
+
+	/// @brief Send a two-step message's CRC, which ends the message. Call it once the payload has been sent, as the
+	/// @brief comms sends one buffer at a time
+	/// @param payload The payload's bytes, as sent
+	/// @param payloadSize Number of payload bytes
+	/// @param headerCRC32 The header's CRC, which the message's CRC carries on from
+	/// @return True if sending started
+	bool sendTwoStepCRC(const uint8_t *payload, const uint32_t payloadSize, const uint32_t headerCRC32)
+	{
+		// The CRC covers the header and the payload, as one message
+		const uint32_t crc32 = calcCRC32(payload, payloadSize, headerCRC32);
+
+		// Placed after the header, so the header is left intact for its CRC above
+		uint8_t *crc32Bytes = &_messageToSend.buffer[HEADER_SIZE];
+		packUInt32(crc32Bytes, crc32);
+
+		// The comms sends one buffer at a time, so the payload must finish before the CRC starts
+		_comms.waitForTXIdle();
+		return _comms.sendBytes(crc32Bytes, CRC32_SIZE);
 	}
 
 	/// @brief Send a message too big for the receiver's frame buffer as two frames: the header, then the payload.
 	/// @brief A CRC is also appended to the end of the message to help validate the data was sent successfully
 	/// @param messageType The message's type
-	/// @param payload The payload's bytes. They must stay unchanged until the comms' waitForTXIdle returns
+	/// @param payload The payload's bytes. They must stay unchanged until the whole message has been sent
 	/// @param payloadSize Number of payload bytes, more than MAX_ONE_STEP_PAYLOAD_SIZE
+	/// @param callback Called from process once an async send has been sent, or nullptr if the caller waits for it.
+	/// 		For an async send, the CRC is left for process to send once the payload has been sent
 	/// @return True if every part was sent or started
-	bool sendTwoStep(const Send_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
+	bool sendTwoStep(const Send_Message_Type messageType,
+					 const uint8_t *payload, const uint32_t payloadSize,
+					 const On_Sent_Callback callback)
 	{
 		// Built in permanent memory, not a local array: the comms is still sending the CRC placed in it below
 		// after this function returns, when a local array's memory would already be reused
@@ -238,17 +333,70 @@ private:
 		if (!_comms.sendBytes(payload, payloadSize))
 			return false;
 
-		// The CRC covers the header and the payload, as one message
 		const uint32_t headerCRC32 = calcCRC32(header, HEADER_SIZE);
-		const uint32_t crc32 = calcCRC32(payload, payloadSize, headerCRC32);
 
-		// Placed after the header, so the header is left intact for its CRC above
-		uint8_t *crc32Bytes = &_messageToSend.buffer[HEADER_SIZE];
-		packUInt32(crc32Bytes, crc32);
+		if (callback != nullptr)
+		{
+			_messageSendingAsync.twoStep = true;
+			_messageSendingAsync.messageType = messageType;
+			_messageSendingAsync.payload = payload;
+			_messageSendingAsync.payloadSize = payloadSize;
+			_messageSendingAsync.headerCRC32 = headerCRC32;
+			_messageSendingAsync.callback = callback;
+		}
+		else if (!sendTwoStepCRC(payload, payloadSize, headerCRC32))
+			return false;
 
-		// The comms sends one buffer at a time, so the payload must finish before the CRC starts
-		_comms.waitForTXIdle();
-		return _comms.sendBytes(crc32Bytes, CRC32_SIZE);
+		return true;
+	}
+
+	/// @brief Send a message, in one step or two by its payload size
+	/// @param messageType The message's type
+	/// @param payload The payload's bytes
+	/// @param payloadSize Number of payload bytes, up to MAX_TWO_STEP_PAYLOAD_SIZE
+	/// @param callback Called from process once an async send has been sent, or nullptr to return only once every
+	/// 		byte has been sent
+	/// @return True if sent, or for an async send, started. False if not (e.g. an async send is still in progress)
+	bool send(const Send_Message_Type messageType,
+			  const uint8_t *payload, const uint32_t payloadSize,
+			  const On_Sent_Callback callback)
+	{
+		if (payloadSize > MAX_TWO_STEP_PAYLOAD_SIZE)
+			return false;
+
+		// If there is a message being sent then reject this one..
+		if (_messageSendingAsync.callback != nullptr)
+			return false;
+
+		logValue(F("Messenger sending. Message type = "), static_cast<uint8_t>(messageType));
+		logValue(F("Messenger sending. Payload size = "), payloadSize);
+
+		_comms.startSendFrame();
+
+		// Decide whether it will be sent in one or two steps - this is done purely by payload size
+		if (payloadSize <= MAX_ONE_STEP_PAYLOAD_SIZE)
+		{
+			if (!sendOneStep(messageType, payload, payloadSize, callback))
+			{
+				_comms.stopSendFrame();
+				return false;
+			}
+		}
+		else if (!sendTwoStep(messageType, payload, payloadSize, callback))
+		{
+			_comms.stopSendFrame();
+			return false;
+		}
+
+		// If this is being sent asynchronously then record message and don't wait..
+		if (callback == nullptr)
+		{
+			// The frame only ends once its last byte has been sent
+			_comms.waitForTXIdle();
+			_comms.stopSendFrame();
+		}
+
+		return true;
 	}
 
 	/// @brief Handle a frame starting or ending on the receiving FL line.
@@ -276,7 +424,7 @@ private:
 				// Step 2: a new message's frame has been received. It's only taken if the last message has been
 				// handled, and if it starts with a header (the payload frame of a dropped two-step message doesn't)
 				if (_messageReceived)
-					_lastError = Error::MessageDropped;
+					_lastError = Error::ReceivedMessageDropped;
 
 				else if (_frameBuffer[HEADER_START_BYTE_INDEX] != HEADER_START_BYTE)
 					_lastError = Error::InvalidStartByte;
@@ -319,9 +467,7 @@ private:
 public:
 	/// @brief Create a messenger that sends and receives through a comms
 	/// @param comms The comms, created with its MCU's config. It must outlive the messenger
-	explicit Data_Messenger(Comms &comms) : _comms(comms)
-	{
-	}
+	explicit Data_Messenger(Comms &comms) : _comms(comms) {}
 
 	~Data_Messenger()
 	{
@@ -367,42 +513,27 @@ public:
 	/// @param messageType The message's type
 	/// @param payload The payload's bytes
 	/// @param payloadSize Number of payload bytes
-	/// @return True if sent, false if a part of it couldn't be sent
+	/// @return True if sent, false if not (e.g. the payload is too big)
 	bool send(const Send_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
 	{
-		if (payloadSize > MAX_TWO_STEP_PAYLOAD_SIZE)
-			return false;
-
-		logValue(F("Messenger sending. Message type = "), static_cast<uint8_t>(messageType));
-		logValue(F("Messenger sending. Payload size = "), payloadSize);
-
-		_comms.startSendFrame();
-
-		// Decide whether it will be sent in one or two steps - this is done purely by payload size
-		if (payloadSize <= MAX_ONE_STEP_PAYLOAD_SIZE)
-		{
-			if (!sendOneStep(messageType, payload, payloadSize))
-			{
-				_comms.stopSendFrame();
-				return false;
-			}
-		}
-		else if (!sendTwoStep(messageType, payload, payloadSize))
-		{
-			_comms.stopSendFrame();
-			return false;
-		}
-
-		// The frame only ends once its last byte has been sent
-		_comms.waitForTXIdle();
-
-		_comms.stopSendFrame();
-		return true;
+		return send(messageType, payload, payloadSize, nullptr);
 	}
 
-	/// @brief Check for a received message. If one has arrived and is valid, the receive callback is called with it.
+	/// @brief Send a message in the background. Returns once sending has started; process finishes it
+	/// @param messageType The message's type
+	/// @param payload The payload's bytes. They must stay unchanged until callback is called
+	/// @param payloadSize Number of payload bytes
+	/// @param callback Called from process once every byte has been sent. Required
+	/// @return True if sending started, false if not (e.g. an async send is still in progress)
+	bool sendAsync(const Send_Message_Type messageType, const uint8_t *payload,
+				   const uint32_t payloadSize, const On_Sent_Callback callback)
+	{
+		return (callback != nullptr) && send(messageType, payload, payloadSize, callback);
+	}
+
+	/// @brief Process internal events i.e. check for a received message, check if an async send has completed.
 	/// @brief Errors, including an invalid message, are reported through the error callback
-	void checkForMessages()
+	void process()
 	{
 		// Errors found by the interrupt are reported here, as the callback can't be called from an interrupt.
 		// Note: Errors relate to frames that were rejected, not a message being held, so checking message received still happens
@@ -412,14 +543,39 @@ public:
 			_lastError = Error::None;
 		}
 
+		// Check if there's an async message that has finished sending its payload.
+		// If there is, the final thing to do for a two-step message is to send its CRC32
+		if ((_messageSendingAsync.callback != nullptr) && !_comms.sendingBytes())
+		{
+			if (_messageSendingAsync.twoStep && !sendTwoStepCRC(_messageSendingAsync.payload,
+																_messageSendingAsync.payloadSize,
+																_messageSendingAsync.headerCRC32))
+			{
+				_comms.stopSendFrame();
+
+				_messageSendingAsync = {};
+				triggerErrorCallback(Error::SendAsyncMessageFail);
+			}
+			else
+			{
+				_comms.waitForTXIdle();
+				_comms.stopSendFrame();
+
+				// Cleared before its callback, so the callback can start the next send
+				const TX_Message_Async sentMessage = _messageSendingAsync;
+				_messageSendingAsync = {};
+				triggerSentCallback(sentMessage);
+			}
+		}
+
 		if (!_messageReceived)
 			return;
 
 		const uint8_t *header = _receivedMessage.oneStepBuffer;
 		const uint32_t payloadSize = unpackUInt32(&header[PAYLOAD_SIZE_INDEX]);
 
-		// A one-step payload and its CRC follow the header; a two-step payload and its CRC were received into
-		// their own buffer
+		// A one-step payload and its CRC follow the header; a two-step payload
+		// and its CRC were received into their own buffer
 		const uint8_t *payload = nullptr;
 		const uint8_t *crc32Bytes = nullptr;
 

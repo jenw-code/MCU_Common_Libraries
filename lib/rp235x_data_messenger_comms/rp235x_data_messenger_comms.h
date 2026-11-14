@@ -105,6 +105,30 @@ private:
 		delayMicroseconds(sendMicros);
 	}
 
+	// The sendingBytes overloads let the TX config's type pick how to check (hardware or PIO UART)
+
+	/// @brief Whether a hardware UART is still sending, up to the end of the last stop bit. Check it once nothing
+	/// @brief more will be written to the TX FIFO, as the UART is briefly idle between bytes written slower than it
+	/// @brief sends them
+	/// @param txConfig The config given to setup_TX
+	/// @return True while the UART is sending
+	static bool sendingBytes(const RP235x_UART_Config &txConfig)
+	{
+		const uart_hw_t *const uartHW = uart_get_hw(uart_get_instance(txConfig.uartIndex));
+		return ((uartHW->fr & UART_UARTFR_BUSY_BITS) != 0);
+	}
+
+	/// @brief Whether a PIO UART's TX FIFO still holds bytes. Check it once nothing more will be written to the
+	/// @brief TX FIFO, as the FIFO is briefly empty between bytes written slower than they're sent
+	/// @param txConfig The config given to setup_TX
+	/// @return True while the FIFO holds bytes. The last bits are still being sent once it's empty, so
+	/// 		waitForTXIdle is needed to know every bit has been sent
+	static bool sendingBytes(const RP235x_PIO_UART_Config &txConfig)
+	{
+		const PIO pio = pio_get_instance(txConfig.pioIndex);
+		return !pio_sm_is_tx_fifo_empty(pio, txConfig.stateMachine);
+	}
+
 	// The clearRXFIFO overloads let the RX config's type pick how to clear it (hardware or PIO UART)
 
 	/// @brief Discard any bytes waiting in a hardware UART's RX FIFO
@@ -251,6 +275,16 @@ public:
 			tight_loop_contents();
 
 		waitForTXIdle(_uartConfig.uartTX);
+	}
+
+	/// @brief Whether bytes given to sendBytes are still being sent, without waiting. Once it's false,
+	/// @brief waitForTXIdle returns within the last few bits' time
+	/// @return True while the DMA or the UART is still sending
+	bool sendingBytes()
+	{
+		// The DMA is checked first: once it has finished nothing more is written to the
+		// FIFO, so the UART can't be caught idle between bytes
+		return dma_channel_is_busy(_dmaTX.channel) || sendingBytes(_uartConfig.uartTX);
 	}
 
 	/// @brief Start the DMA receiving bytes into a buffer, in the background
