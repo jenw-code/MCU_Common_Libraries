@@ -129,7 +129,17 @@ protected:
 	static constexpr uint8_t MIX_BIT_MIX = (1 << 0); // mix: 0 = write, 1 = read
 
 	// NLink_TOFSense_F_Setting_Frame0 mode bits
+	static constexpr uint8_t MODE_BIT_RESERVED_0 = (1 << 0);  // Reserved
 	static constexpr uint8_t MODE_BIT_OUTPUT_MODE = (1 << 1); // output mode: 0 = active, 1 = inquire
+
+	static constexpr uint8_t MODE_BIT_RANGE_MODE_0 = (1 << 2); // Range Mode uses two bits:
+	static constexpr uint8_t MODE_BIT_RANGE_MODE_1 = (1 << 3); // 00: Short range, 01: Medium range, 10: Long Range
+
+	static constexpr uint8_t MODE_BIT_INTERFACE_MODE_0 = (1 << 4); // Interface Mode uses two bits:
+	static constexpr uint8_t MODE_BIT_INTERFACE_MODE_1 = (1 << 5); // 00: UART, 01: CAN, 10: I/O, 11: I2C
+
+	static constexpr uint8_t MODE_BIT_RESERVED_6 = (1 << 6); // Reserved
+	static constexpr uint8_t MODE_BIT_RESERVED_7 = (1 << 7); // Reserved
 
 	// Frame values
 	static constexpr uint8_t FRAME_HEADER = 0x57;					// Frame Header of NLink_TOFSense_Frame0 and NLink_TOFSense_Read_Frame0
