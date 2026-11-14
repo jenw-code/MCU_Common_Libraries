@@ -20,7 +20,7 @@ struct RP235x_UART_Config final
 struct RP235x_UART_RX final
 {
 	const volatile void *address = nullptr;
-	uint dreq = 0;
+	uint dreq = 0;		   // Signals while the RX FIFO holds data, for a DMA to pace its reads by
 	uint32_t baudRate = 0; // (bits per second)
 };
 
@@ -37,18 +37,39 @@ struct RP235x_UART_TX final
 /// @brief Its RX FIFO is only 32 bytes, so the bytes received must be read as they arrive, e.g. by a DMA
 class RP235x_UART final
 {
-	// TODO: One hardware UART serves both directions, but each setup and teardown acts on the
-	// whole UART. Record which directions are set up, and the baud rate, per UART, so that:
-	// - setup checks both directions use the same baud rate, and only the first one calls
-	//   uart_init, which resets the UART
-	// - teardown only stops the UART once neither direction uses it
 private:
-	/// @brief Tear down one direction of a hardware UART: stop the UART, and return its pin to GPIO
-	/// @param config The UART and its pin, as given to setup_RX or setup_TX
-	static void teardownUART(const RP235x_UART_Config &config)
+	// One hardware UART serves both directions, so which directions use each UART is recorded.
+	// Every setup and teardown uses these to ensure that RX does not affect TX, and vice versa
+	static inline bool _rxInUse[NUM_UARTS] = {};
+	static inline bool _txInUse[NUM_UARTS] = {};
+	static inline uint32_t _baudRateInUse[NUM_UARTS] = {}; // (bits per second) 0 while the UART isn't running
+
+	/// @brief Start one direction of a hardware UART: start the UART unless it's already running, and give the
+	/// @brief direction's pin to the UART
+	/// @param config The UART, the direction's pin, and the baud rate
+	/// @param uartRunning True if the UART is already running
+	static void startUART(const RP235x_UART_Config &config, const bool uartRunning)
 	{
-		uart_deinit(uart_get_instance(config.uartIndex));
+		uart_inst_t *const uartInstance = uart_get_instance(config.uartIndex);
+
+		// uart_init resets the UART, so it's only called to start it.
+		// It enables the DMA requests, and sets the frame format to 8N1: 8 data bits, no parity, 1 stop bit
+		if (!uartRunning)
+			uart_init(uartInstance, static_cast<uint>(config.baudRate));
+
+		gpio_set_function(config.pin, UART_FUNCSEL_NUM(uartInstance, config.pin));
+	}
+
+	/// @brief Tear down one direction of a hardware UART: return the direction's pin to GPIO, and stop
+	/// @brief the UART unless it's still needed
+	/// @param config The UART and the direction's pin, as given to setup_RX or setup_TX
+	/// @param uartStillNeeded True if the UART is still needed
+	static void teardownUART(const RP235x_UART_Config &config, const bool uartStillNeeded)
+	{
 		gpio_deinit(config.pin);
+
+		if (!uartStillNeeded)
+			uart_deinit(uart_get_instance(config.uartIndex));
 	}
 
 public:
@@ -59,23 +80,30 @@ public:
 	/// @param rxConfig The UART to receive with, the pin to receive on, and the baud rate. The pin must be one of the
 	/// UART's RX pins
 	/// @param rx Receives the UART's RX info. Only changed if the UART is set up
-	/// @return True if set up, false if the UART doesn't exist
+	/// @return True if set up, false if the UART doesn't exist, already receives, or sends at a different baud rate
 	static bool setup_RX(const RP235x_UART_Config &rxConfig, RP235x_UART_RX &rx)
 	{
-		if (rxConfig.uartIndex >= NUM_UARTS)
+		const uint8_t uartIndex = rxConfig.uartIndex;
+		if ((uartIndex >= NUM_UARTS) || _rxInUse[uartIndex])
 			return false;
 
-		uart_inst_t *const uartInstance = uart_get_instance(rxConfig.uartIndex);
-		const uint rxPin = rxConfig.pin;
+		if (!_txInUse[uartIndex])
+			_baudRateInUse[uartIndex] = static_cast<uint32_t>(rxConfig.baudRate);
 
-		// Enable the DMA requests (the frame format is set to 8N1: 8 data bits, no parity, 1 stop bit)
-		uart_init(uartInstance, static_cast<uint>(rxConfig.baudRate));
-		gpio_set_function(rxPin, UART_FUNCSEL_NUM(uartInstance, rxPin));
+		// Both directions share the UART, so they must share its baud rate
+		else if (static_cast<uint32_t>(rxConfig.baudRate) != _baudRateInUse[uartIndex])
+			return false;
+
+		// The UART is already running if it sends
+		startUART(rxConfig, _txInUse[uartIndex]);
+
+		uart_inst_t *const uartInstance = uart_get_instance(uartIndex);
 
 		rx.address = &uart_get_hw(uartInstance)->dr;
 		rx.dreq = uart_get_dreq_num(uartInstance, false);
 		rx.baudRate = static_cast<uint32_t>(rxConfig.baudRate);
 
+		_rxInUse[uartIndex] = true;
 		return true;
 	}
 
@@ -83,18 +111,24 @@ public:
 	/// @param txConfig The UART to send with, the pin to send on, and the baud rate. The pin must be one of the
 	/// UART's TX pins
 	/// @param tx Receives the UART's TX info. Only changed if the UART is set up
-	/// @return True if set up, false if the UART doesn't exist
+	/// @return True if set up, false if the UART doesn't exist, already sends, or receives at a different baud rate
 	static bool setup_TX(const RP235x_UART_Config &txConfig, RP235x_UART_TX &tx)
 	{
-		if (txConfig.uartIndex >= NUM_UARTS)
+		const uint8_t uartIndex = txConfig.uartIndex;
+		if ((uartIndex >= NUM_UARTS) || _txInUse[uartIndex])
 			return false;
 
-		uart_inst_t *const uartInstance = uart_get_instance(txConfig.uartIndex);
-		const uint txPin = txConfig.pin;
+		if (!_rxInUse[uartIndex])
+			_baudRateInUse[uartIndex] = static_cast<uint32_t>(txConfig.baudRate);
 
-		// Enable the DMA requests (the frame format is set to 8N1: 8 data bits, no parity, 1 stop bit)
-		uart_init(uartInstance, static_cast<uint>(txConfig.baudRate));
-		gpio_set_function(txPin, UART_FUNCSEL_NUM(uartInstance, txPin));
+		// Both directions share the UART, so they must share its baud rate
+		else if (static_cast<uint32_t>(txConfig.baudRate) != _baudRateInUse[uartIndex])
+			return false;
+
+		// The UART is already running if it receives
+		startUART(txConfig, _rxInUse[uartIndex]);
+
+		uart_inst_t *const uartInstance = uart_get_instance(uartIndex);
 
 		tx.address = &uart_get_hw(uartInstance)->dr;
 		tx.statusAddress = &uart_get_hw(uartInstance)->fr;
@@ -102,21 +136,36 @@ public:
 		tx.dreq = uart_get_dreq_num(uartInstance, true);
 		tx.baudRate = static_cast<uint32_t>(txConfig.baudRate);
 
+		_txInUse[uartIndex] = true;
 		return true;
 	}
 
-	/// @brief Tear down a hardware UART that receives
+	/// @brief Tear down a hardware UART that receives. The UART keeps running while it still sends
 	/// @param rxConfig The config given to setup_RX
 	static void teardown_RX(const RP235x_UART_Config &rxConfig)
 	{
-		teardownUART(rxConfig);
+		const uint8_t uartIndex = rxConfig.uartIndex;
+		_rxInUse[uartIndex] = false;
+
+		// The UART is still needed if it sends
+		teardownUART(rxConfig, _txInUse[uartIndex]);
+
+		if (!_txInUse[uartIndex])
+			_baudRateInUse[uartIndex] = 0;
 	}
 
-	/// @brief Tear down a hardware UART that sends
+	/// @brief Tear down a hardware UART that sends. The UART keeps running while it still receives
 	/// @param txConfig The config given to setup_TX
 	static void teardown_TX(const RP235x_UART_Config &txConfig)
 	{
-		teardownUART(txConfig);
+		const uint8_t uartIndex = txConfig.uartIndex;
+		_txInUse[uartIndex] = false;
+
+		// The UART is still needed if it receives
+		teardownUART(txConfig, _rxInUse[uartIndex]);
+
+		if (!_rxInUse[uartIndex])
+			_baudRateInUse[uartIndex] = 0;
 	}
 };
 
@@ -225,7 +274,7 @@ private:
 	/// @return True if set up,false if the state machine doesn't exist or is already claimed, the pin is outside
 	/// 		its PIO's 32 pin window, or the PIO has no room for the program
 	static bool setupStateMachine(const RP235x_PIO_UART_Config &config, const pio_program_t &program,
-								   LoadedProgram (&loadedPrograms)[NUM_PIOS], uint &offset)
+								  LoadedProgram (&loadedPrograms)[NUM_PIOS], uint &offset)
 	{
 		if ((config.pioIndex >= NUM_PIOS) || (config.stateMachine >= NUM_PIO_STATE_MACHINES))
 			return false;
