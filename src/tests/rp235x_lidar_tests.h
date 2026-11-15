@@ -11,9 +11,10 @@
 
 RP235x_TOF_Laser_Range_Mini_UART_DMA<UART_Master::BaudRate::Baud921600> *lidar1 = nullptr;
 
-void lidarCallback(TOF_Laser_Range_Mini & /* sender */, const uint32_t distance)
+void lidarAlertCallback(TOF_Laser_Range_Mini & /* sender */, const TOF_Laser_Range_Mini::Alert alert, const uint32_t distance)
 {
-	logValue("MIN DISTANCE CALLBACK. DISTANCE = ", distance);
+	logValue("Alert triggered: ", static_cast<uint8_t>(alert));
+	logValue("Alert distance = ", distance);
 }
 
 constexpr uint16_t LIDAR_BUFFER_SIZE = 64;
@@ -55,7 +56,7 @@ bool setupLidar()
 		{
 			logStr("setupLidar Success");
 
-			lidar1->enableAutoChecker(200, 100, lidarCallback);
+			lidar1->enableAlerts(100, lidarAlertCallback, 200);
 			return true;
 		}
 	}
@@ -70,7 +71,7 @@ void checkLidar()
 {
 	if (lidar1 != nullptr)
 	{
-		lidar1->checkDistance();
+		lidar1->checkAlerts();
 	}
 
 	// Well under the auto-checker's 200 ms interval, so checkDistance runs each time its timer asks

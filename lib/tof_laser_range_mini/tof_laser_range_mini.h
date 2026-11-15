@@ -2,10 +2,6 @@
 
 #include <Arduino.h>
 
-class TOF_Laser_Range_Mini; // Forward declaration
-
-typedef void (*TOF_Laser_Range_Mini_Callback)(TOF_Laser_Range_Mini &sender, const uint32_t distance);
-
 /// @brief Base class for the Waveshare TOF Laser Range Sensor Mini (a Nooploop TOFSense-F2 Mini)
 /// @brief Holds Nooploop's NLink TOFSense protocol, shared by the versions that receive it in different ways
 class TOF_Laser_Range_Mini
@@ -56,18 +52,27 @@ public:
 		Rate_350Hz = 350
 	};
 
-protected:
-	struct AutoChecker
+	enum class Alert : uint8_t
 	{
-		repeating_timer_t timer = {};					  // Timer triggering check
-		uint32_t minDistanceThreshold = 0;				  // (mm)
-		TOF_Laser_Range_Mini_Callback callback = nullptr; // Function to call when minDistanceThreshold met
+		None = 0,
+		MinDistance = 1
+	};
+
+	typedef void (*Alert_Callback)(TOF_Laser_Range_Mini &sender, const Alert alert, const uint32_t distance);
+
+protected:
+	struct AlertChecker
+	{
+		uint32_t minDistanceAlertThreshold = 0; // Min distance (mm) allowed before alert is triggered
+		Alert_Callback callback = nullptr;		// Function to call when an alert is triggered
+		uint16_t checkIntervalMillis = 0;		// Time between checks (ms)
+		uint32_t lastCheckMillis = 0;			// When the last check ran (ms)
 	};
 
 	OutputMode _outputMode = OutputMode::Unknown;	 // Read from the device in startDevice, as the device keeps its mode
 	RefreshRate _refreshRate = RefreshRate::Unknown; // Read from the device in startDevice, as the device keeps its rate
-	AutoChecker _autoChecker;
-	volatile bool _checkDistanceRequired = false;
+	AlertChecker _alertChecker;
+	Alert _activeAlert = Alert::None;
 
 	const uint32_t _baudRate; // The UART's baud rate (bits per second), for timing the device's replies
 
@@ -290,9 +295,6 @@ protected:
 	/// @param request Receives the request
 	static void populateSettingsRequestFrame(uint8_t (&request)[F_SETTING_FRAME0_SIZE])
 	{
-		// HARDWARE CHECK NEEDED: the manual only shows a settings write, so this read request is unconfirmed.
-		// Check the device replies to it.
-
 		// Fields the request doesn't set, including the reserved ones, are sent as 0xFF, as in the manual's write example
 		constexpr uint8_t NOT_SET_VALUE = 0xFF;
 
@@ -353,21 +355,6 @@ protected:
 		settings.filterFactor = unpackField<uint8_t>(frame, F_SETTING_FRAME0_FILTER_FACTOR_INDEX);
 
 		return settings;
-	}
-
-	/// @brief Read a measurement, which calls the callback if the distance is below the threshold.
-	/// @brief Called by the repeating timer, in interrupt context
-	/// @param timer The repeating timer, whose user data is the instance being checked
-	/// @return True, to keep the timer repeating
-	static bool handleAutoCheckTimer(repeating_timer_t *timer)
-	{
-		if (timer->user_data != nullptr)
-		{
-			TOF_Laser_Range_Mini *lidar = static_cast<TOF_Laser_Range_Mini *>(timer->user_data);
-			lidar->_checkDistanceRequired = true;
-		}
-
-		return true;
 	}
 
 	/// @brief Write bytes to the device
@@ -544,10 +531,7 @@ protected:
 
 public:
 	// Virtual, so either version can be deleted through a base pointer
-	virtual ~TOF_Laser_Range_Mini()
-	{
-		disableAutoChecker();
-	}
+	virtual ~TOF_Laser_Range_Mini() = default;
 
 	/// @brief Start the device and confirm it responds
 	/// @param retryCount Number of attempts before giving up
@@ -686,52 +670,65 @@ public:
 		return true;
 	}
 
-	void disableAutoChecker()
+	/// @brief Stop the alert checks
+	void disableAlerts()
 	{
-		cancel_repeating_timer(&_autoChecker.timer);
-		_autoChecker.callback = nullptr;
+		_alertChecker = {};
+		_activeAlert = Alert::None;
 	}
 
-	/// @brief Check the distance periodically, calling the callback whenever it's below the threshold
-	/// @brief This is not fully-automatic. Timer interrupt will only set flag. CheckDistance must be
-	/// @brief called for any checks to be run. Make sure CheckDistance is called as often as the
-	/// @brief auto-check interval requires
-	/// @param intervalMillis Time between checks (ms)
-	/// @param minDistanceThreshold The distance below which the callback is called (mm)
-	/// @param callback Called with the distance
-	/// @return True if the checks started
-	bool enableAutoChecker(const uint16_t intervalMillis, const uint32_t minDistanceThreshold, const TOF_Laser_Range_Mini_Callback callback)
+	/// @brief Set up and enable alerts, which call the callback when a threshold is broken. Checks are only
+	/// @brief carried out by checkAlerts, so it must be called at least as often as the check interval
+	/// @param minDistanceAlertThreshold The distance below which the callback is called (mm)
+	/// @param callback The function to call when a threshold is broken
+	/// @param checkIntervalMillis Time between checks (ms)
+	/// @return True if alerts were enabled, false if there's no callback
+	bool enableAlerts(const uint32_t minDistanceAlertThreshold,
+					  const Alert_Callback callback,
+					  const uint16_t checkIntervalMillis = 100)
 	{
 		if (callback == nullptr)
 			return false;
 
-		disableAutoChecker();
+		_alertChecker.minDistanceAlertThreshold = minDistanceAlertThreshold;
+		_alertChecker.callback = callback;
+		_alertChecker.checkIntervalMillis = checkIntervalMillis;
+		// So the first call to checkAlerts carries out a check straight away
+		_alertChecker.lastCheckMillis = 0;
 
-		_autoChecker.minDistanceThreshold = minDistanceThreshold;
-		_autoChecker.callback = callback;
+		_activeAlert = Alert::None;
 
-		// A negative interval is measured from the start of one check to the start of the next,
-		// so the checks keep a fixed rate
-		return add_repeating_timer_ms(-static_cast<int32_t>(intervalMillis), handleAutoCheckTimer, this, &_autoChecker.timer);
+		return true;
 	}
 
-	void checkDistance()
+	/// @brief Carry out an alert check, if one is due. The callback is called when a threshold is first broken,
+	/// @brief and not again until it's no longer broken
+	void checkAlerts()
 	{
-		// A measurement can only be read once the device's output mode is known
-		if (_outputMode == OutputMode::Unknown)
+		// Alerts must be enabled, and a measurement can only be read once the device's output mode is known
+		if ((_alertChecker.callback == nullptr) || (_outputMode == OutputMode::Unknown))
 			return;
 
-		if (_checkDistanceRequired)
-		{
-			Measurement measurement;
-			if (readMeasurement(measurement) &&
-				(measurement.distance < _autoChecker.minDistanceThreshold) &&
-				(_autoChecker.callback != nullptr))
-			{
-				_autoChecker.callback(*this, measurement.distance);
-			}
+		if ((millis() - _alertChecker.lastCheckMillis) < _alertChecker.checkIntervalMillis)
+			return;
 
-			_checkDistanceRequired = false;
+		_alertChecker.lastCheckMillis = millis();
+
+		Measurement measurement;
+		if (readMeasurement(measurement))
+		{
+			// Only trigger alert when it's not active and first breaches threshold
+			// Also clear alert when its condition no longer breaches threshold
+			if (_activeAlert == Alert::MinDistance)
+			{
+				if (measurement.distance >= _alertChecker.minDistanceAlertThreshold)
+					_activeAlert = Alert::None;
+			}
+			else if (measurement.distance < _alertChecker.minDistanceAlertThreshold)
+			{
+				_activeAlert = Alert::MinDistance;
+				_alertChecker.callback(*this, _activeAlert, measurement.distance);
+			}
 		}
 	}
 
@@ -747,5 +744,12 @@ public:
 	RefreshRate getRefreshRate() const
 	{
 		return _refreshRate;
+	}
+
+	/// @brief Get the active alert (this can be None)
+	/// @return The active alert
+	Alert ActiveAlert() const
+	{
+		return _activeAlert;
 	}
 };
