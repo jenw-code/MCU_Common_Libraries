@@ -20,13 +20,13 @@ The coding standards Claude works to on every project: the standing rules, follo
 12. **If the code relies on something, validate it.** A comment isn't a safeguard. `static_assert` at compile time, otherwise a runtime check. Better still, design the assumption out.
 13. **Where a validation goes:** next to the shared declaration if several functions rely on it, otherwise first in the function that relies on it. Never act and then check. Validate once, at the entry point; don't guard what's already guaranteed.
 14. **Never do work that can't ever be used.**
+15. **Don't be lazy with headers.** Every function documents every `@param` and `@tparam` (what it is, units, range), whatever its scope.
 16. **The code's shape mirrors its intent.** Write it the way you'd explain it: "if the CRC is wrong, report it; otherwise, if the type is unknown, report that; otherwise, deliver the message" becomes exactly that chain. If the code's shape tells a different story (for example, working out every check up front when the first failure stops everything), the intent is lost, however correct the result. Where the code can't easily show its intent, a comment states it. Show the logic clearly even where it may be disagreed with: clear logic can be discussed and corrected, but hidden logic can't.
 17. **On mirrors off.** Paired actions (setup and teardown, start and stop) mirror each other: whatever state one sets, the other clears, and in the matching place. A value set on the way in but left alone on the way out reads as an oversight.
 18. **The same kind of work happens at the same level.** If the public functions update shared state, the helpers don't update any of it (and vice versa). Consistency gives each function a clear definition of what it does.
 19. **Decide each function's responsibility before writing it.** Work out which function owns which state and which hardware action, and check the split against "on mirrors off" and "same work at the same level". Patching responsibilities one at a time, as problems show up, ends in a mess.
-- **Use an `else if` instead of nesting an `if` in a branch.** The `else` already says the previous condition was false, so a separate nested block adds depth without adding meaning.
-20. **Name a parameter for what it means to the function receiving it,** not for where the caller got it. A helper that starts a UART cares whether the UART is already running, not whether "the other direction" is in use.
-15. **Don't be lazy with headers.** Every function documents every `@param` and `@tparam` (what it is, units, range), whatever its scope.
+20. **Use an `else if` instead of nesting an `if` in a branch.** The `else` already says the previous condition was false, so a separate nested block adds depth without adding meaning.
+21. **Name a parameter for what it means to the function receiving it,** not for where the caller got it. A helper that starts a UART cares whether the UART is already running, not whether "the other direction" is in use.
 
 ## C++ / embedded library conventions (PlatformIO Arduino, 32-bit MCUs)
 
@@ -42,9 +42,8 @@ The coding standards Claude works to on every project: the standing rules, follo
   - "initialise": a value that will change later.
   - "read": from the device, even for a fixed property.
   - "parse": breaking down a data format from bytes already held, such as a whole frame. You parse XML.
-  - "pack" and "unpack": byte manipulation, putting a value into bytes or taking it out of them. You unpack a
-    stream of bytes.
-  - "pack" / "unpack": one value into bytes, and back again (`packUInt32`, `unpackUInt32`).
+  - "pack" / "unpack": byte manipulation, putting one value into bytes and taking it back out of them
+    (`packUInt32`, `unpackUInt32`).
   - "get": only a cached value or a status.
   - "enable…": only if the call actually makes the thing work; otherwise "set…".
   - `reset()`: the whole device.
@@ -78,7 +77,8 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **A generic class names only what it relies on, never how its parts provide it.** If a driver's code and comments mention its engine's mechanism (DMA, UART), either the driver depends on it or the wording is wrong. Removing such mentions is a good test of whether the class is really generic.
 - **A state enum describes one thing's lifecycle.** Name it after that thing, and give it only that thing's states: a receive state never includes a sending value. Read cold, `Message_State::Sending` in a receiver's enum mixes two directions.
 - **Enums constrain public interfaces; internal state can be a plain value.** An enum protects a caller choosing a setting. A value kept only for an internal check (e.g. "are these two the same?") gains little from being an enum, and a plain value can have a natural "none" (0) without adding `Unknown` to a shared enum.
-- **Read names as a stranger would.** A name that needs explaining isn't right yet. A size is named in the unit a reader expects (bytes, not a power-of-two exponent).- **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".
+- **Read names as a stranger would.** A name that needs explaining isn't right yet. A size is named in the unit a reader expects (bytes, not a power-of-two exponent).
+- **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".
 
 ### Comments and headers
 - **A detail that's defined once in code isn't repeated in comments.** For example, once a constant says which level means "active", comments elsewhere don't mention levels; otherwise they go stale when the detail changes.
