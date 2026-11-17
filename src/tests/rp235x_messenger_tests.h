@@ -67,8 +67,8 @@ MessengerClass messengerUnderTest(commsUnderTest);
 
 //------------------------------------ MESSENGER TEST PAYLOAD --------------------------------------
 
-// The largest payload sent in one step: the 64-byte frame, less the 6-byte header and the 4-byte CRC
-constexpr uint32_t MAX_ONE_STEP_PAYLOAD_SIZE = 64 - (6 + 4);
+// The largest payload sent in one step: the 64-byte frame, less the 7-byte header and the 4-byte CRC
+constexpr uint32_t MAX_ONE_STEP_PAYLOAD_SIZE = 64 - (7 + 4);
 
 // Global, as the largest payload is far too big for the stack
 uint8_t testPayload[MAX_PAYLOAD_SIZE] = {};

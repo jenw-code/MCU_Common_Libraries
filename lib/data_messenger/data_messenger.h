@@ -2,6 +2,7 @@
 
 #include <Arduino.h>
 #include "common.debug.h"
+#include "common.data.packing.h"
 #include "common.parse.h"
 
 /// @brief What every Data_Messenger and its comms share
@@ -67,7 +68,7 @@ public:
 	/// @brief The errors a messenger reports
 	enum class Error : uint8_t
 	{
-		None,					// No error since the last report
+		None = 0,				// No error since the last report
 		SendAsyncMessageFail,	// Async message failed to send
 		ReceivedMessageDropped, // A message arrived before the last one was handled
 		InvalidStartByte,		// A frame didn't start with a header
@@ -89,15 +90,16 @@ public:
 
 private:
 	static constexpr uint8_t FRAME_BUFFER_SIZE = 64;
-	static constexpr uint8_t HEADER_SIZE = 6; // HEADER_START_BYTE, message type, BUFFER_SIZE (4 bytes);
+	static constexpr uint8_t HEADER_SIZE = 7; // HEADER_START_BYTE, message type, payload type, payload size (4 bytes);
 	static constexpr uint8_t CRC32_SIZE = 4;
 
 	// Header layout
 	static constexpr uint8_t HEADER_START_BYTE_INDEX = 0;
 	static constexpr uint8_t MESSAGE_TYPE_INDEX = 1;
-	static constexpr uint8_t PAYLOAD_SIZE_INDEX = 2;
+	static constexpr uint8_t PAYLOAD_TYPE_INDEX = 2;
+	static constexpr uint8_t PAYLOAD_SIZE_INDEX = 3;
 
-	// The payload size and the CRC are each packed by packUInt32
+	// The payload size and the CRC are each packed as a uint32_t
 	static_assert(HEADER_SIZE == PAYLOAD_SIZE_INDEX + sizeof(uint32_t), "The payload size must end the header");
 	static_assert(CRC32_SIZE == sizeof(uint32_t), "The CRC must be a uint32_t");
 
@@ -154,6 +156,23 @@ private:
 		On_Sent_Callback callback = nullptr;
 	};
 
+	/// @brief How a payload's bytes are laid out
+	enum class Payload_Type : uint8_t
+	{
+		Raw = 0,	  // The sender's own layout
+		Parameterised // A list of parameters, each a value type followed by its value
+	};
+
+	/// @brief The type of a parameter's value, sent before the value in a parameterised payload
+	enum class Parameter_Value_Type : uint8_t
+	{
+		Bool = 0, // 1 byte
+		Uint8,	  // 1 byte
+		Uint16,	  // 2 bytes
+		Uint32,	  // 4 bytes
+		Float	  // 4 bytes
+	};
+
 	Comms &_comms;
 
 	volatile bool _messageReceived = false;
@@ -200,30 +219,6 @@ private:
 		return crc ^ INVERT;
 	}
 
-	/// @brief Pack a uint32_t into bytes, little-endian
-	/// @brief e.g. 0x12345678 gives 0x78, 0x56, 0x34, 0x12
-	/// @param bytes Where the 4 bytes go, least significant first
-	/// @param value The value
-	static void packUInt32(uint8_t *bytes, const uint32_t value)
-	{
-		bytes[0] = static_cast<uint8_t>(value);
-		bytes[1] = static_cast<uint8_t>(value >> 8);
-		bytes[2] = static_cast<uint8_t>(value >> 16);
-		bytes[3] = static_cast<uint8_t>(value >> 24);
-	}
-
-	/// @brief Unpack a little-endian uint32_t from bytes
-	/// @brief e.g. 0x78, 0x56, 0x34, 0x12 gives 0x12345678
-	/// @param bytes The 4 bytes, least significant first
-	/// @return The value
-	static uint32_t unpackUInt32(const uint8_t *bytes)
-	{
-		return static_cast<uint32_t>(bytes[0]) |
-			   (static_cast<uint32_t>(bytes[1]) << 8) |
-			   (static_cast<uint32_t>(bytes[2]) << 16) |
-			   (static_cast<uint32_t>(bytes[3]) << 24);
-	}
-
 	/// @brief Report an error through the error callback, if there is one
 	/// @param error The error
 	void triggerErrorCallback(const Error error)
@@ -243,12 +238,13 @@ private:
 	/// @brief Send a message (header and payload) small enough for the receiver's frame buffer as one frame.
 	/// @brief A CRC is also appended to the end of the message to help validate the data was sent successfully
 	/// @param messageType The message's type
+	/// @param payloadType How the payload's bytes are laid out
 	/// @param payload The payload's bytes
 	/// @param payloadSize Number of payload bytes, up to MAX_ONE_STEP_PAYLOAD_SIZE
 	/// @param callback Called from process once an async send has been sent, or nullptr if the caller waits for it
 	/// @return True if sending started
 	bool sendOneStep(const Send_Message_Type messageType,
-					 const uint8_t *payload, const uint32_t payloadSize,
+					 const Payload_Type payloadType, const uint8_t *payload, const uint32_t payloadSize,
 					 const On_Sent_Callback callback)
 	{
 		// Built in permanent memory, not a local array: the comms is still sending from it after
@@ -256,7 +252,8 @@ private:
 		uint8_t *bytes = _messageToSend.buffer;
 		bytes[HEADER_START_BYTE_INDEX] = HEADER_START_BYTE;
 		bytes[MESSAGE_TYPE_INDEX] = static_cast<uint8_t>(messageType);
-		packUInt32(&bytes[PAYLOAD_SIZE_INDEX], payloadSize);
+		bytes[PAYLOAD_TYPE_INDEX] = static_cast<uint8_t>(payloadType);
+		packValue(&bytes[PAYLOAD_SIZE_INDEX], payloadSize);
 
 		// memcpy is undefined for a nullptr source, even when copying nothing
 		if (payloadSize > 0)
@@ -266,7 +263,7 @@ private:
 
 		// Calc and append the crc32
 		const uint32_t crc32 = calcCRC32(bytes, headerAndPayloadSize);
-		packUInt32(&bytes[headerAndPayloadSize], crc32);
+		packValue(&bytes[headerAndPayloadSize], crc32);
 
 		if (!_comms.sendBytes(bytes, headerAndPayloadSize + CRC32_SIZE))
 			return false;
@@ -296,7 +293,7 @@ private:
 
 		// Placed after the header, so the header is left intact for its CRC above
 		uint8_t *crc32Bytes = &_messageToSend.buffer[HEADER_SIZE];
-		packUInt32(crc32Bytes, crc32);
+		packValue(crc32Bytes, crc32);
 
 		// The comms sends one buffer at a time, so the payload must finish before the CRC starts
 		_comms.waitForTXIdle();
@@ -306,13 +303,14 @@ private:
 	/// @brief Send a message too big for the receiver's frame buffer as two frames: the header, then the payload.
 	/// @brief A CRC is also appended to the end of the message to help validate the data was sent successfully
 	/// @param messageType The message's type
+	/// @param payloadType How the payload's bytes are laid out
 	/// @param payload The payload's bytes. They must stay unchanged until the whole message has been sent
 	/// @param payloadSize Number of payload bytes, more than MAX_ONE_STEP_PAYLOAD_SIZE
 	/// @param callback Called from process once an async send has been sent, or nullptr if the caller waits for it.
 	/// 		For an async send, the CRC is left for process to send once the payload has been sent
 	/// @return True if every part was sent or started
 	bool sendTwoStep(const Send_Message_Type messageType,
-					 const uint8_t *payload, const uint32_t payloadSize,
+					 const Payload_Type payloadType, const uint8_t *payload, const uint32_t payloadSize,
 					 const On_Sent_Callback callback)
 	{
 		// Built in permanent memory, not a local array: the comms is still sending the CRC placed in it below
@@ -320,7 +318,8 @@ private:
 		uint8_t *header = _messageToSend.buffer;
 		header[HEADER_START_BYTE_INDEX] = HEADER_START_BYTE;
 		header[MESSAGE_TYPE_INDEX] = static_cast<uint8_t>(messageType);
-		packUInt32(&header[PAYLOAD_SIZE_INDEX], payloadSize);
+		header[PAYLOAD_TYPE_INDEX] = static_cast<uint8_t>(payloadType);
+		packValue(&header[PAYLOAD_SIZE_INDEX], payloadSize);
 
 		if (!_comms.sendBytes(header, HEADER_SIZE))
 			return false;
@@ -352,13 +351,14 @@ private:
 
 	/// @brief Send a message, in one step or two by its payload size
 	/// @param messageType The message's type
+	/// @param payloadType How the payload's bytes are laid out
 	/// @param payload The payload's bytes
 	/// @param payloadSize Number of payload bytes, up to MAX_TWO_STEP_PAYLOAD_SIZE
 	/// @param callback Called from process once an async send has been sent, or nullptr to return only once every
 	/// 		byte has been sent
 	/// @return True if sent, or for an async send, started. False if not (e.g. an async send is still in progress)
 	bool send(const Send_Message_Type messageType,
-			  const uint8_t *payload, const uint32_t payloadSize,
+			  const Payload_Type payloadType, const uint8_t *payload, const uint32_t payloadSize,
 			  const On_Sent_Callback callback)
 	{
 		if (payloadSize > MAX_TWO_STEP_PAYLOAD_SIZE)
@@ -376,13 +376,13 @@ private:
 		// Decide whether it will be sent in one or two steps - this is done purely by payload size
 		if (payloadSize <= MAX_ONE_STEP_PAYLOAD_SIZE)
 		{
-			if (!sendOneStep(messageType, payload, payloadSize, callback))
+			if (!sendOneStep(messageType, payloadType, payload, payloadSize, callback))
 			{
 				_comms.stopSendFrame();
 				return false;
 			}
 		}
-		else if (!sendTwoStep(messageType, payload, payloadSize, callback))
+		else if (!sendTwoStep(messageType, payloadType, payload, payloadSize, callback))
 		{
 			_comms.stopSendFrame();
 			return false;
@@ -433,7 +433,7 @@ private:
 				{
 					memcpy(_receivedMessage.oneStepBuffer, _frameBuffer, FRAME_BUFFER_SIZE);
 
-					const uint32_t payloadSize = unpackUInt32(&_receivedMessage.oneStepBuffer[PAYLOAD_SIZE_INDEX]);
+					const uint32_t payloadSize = unpackValue<uint32_t>(&_receivedMessage.oneStepBuffer[PAYLOAD_SIZE_INDEX]);
 					if (payloadSize <= MAX_ONE_STEP_PAYLOAD_SIZE)
 						_messageReceived = true;
 
@@ -516,7 +516,7 @@ public:
 	/// @return True if sent, false if not (e.g. the payload is too big)
 	bool send(const Send_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
 	{
-		return send(messageType, payload, payloadSize, nullptr);
+		return send(messageType, Payload_Type::Raw, payload, payloadSize, nullptr);
 	}
 
 	/// @brief Send a message in the background. Returns once sending has started; process finishes it
@@ -528,7 +528,7 @@ public:
 	bool sendAsync(const Send_Message_Type messageType, const uint8_t *payload,
 				   const uint32_t payloadSize, const On_Sent_Callback callback)
 	{
-		return (callback != nullptr) && send(messageType, payload, payloadSize, callback);
+		return (callback != nullptr) && send(messageType, Payload_Type::Raw, payload, payloadSize, callback);
 	}
 
 	/// @brief Process internal events i.e. check for a received message, check if an async send has completed.
@@ -572,7 +572,7 @@ public:
 			return;
 
 		const uint8_t *header = _receivedMessage.oneStepBuffer;
-		const uint32_t payloadSize = unpackUInt32(&header[PAYLOAD_SIZE_INDEX]);
+		const uint32_t payloadSize = unpackValue<uint32_t>(&header[PAYLOAD_SIZE_INDEX]);
 
 		// A one-step payload and its CRC follow the header; a two-step payload
 		// and its CRC were received into their own buffer
@@ -597,7 +597,7 @@ public:
 		const uint32_t headerCRC32 = calcCRC32(header, HEADER_SIZE);
 		const uint32_t crc32 = calcCRC32(payload, payloadSize, headerCRC32);
 
-		if (crc32 == unpackUInt32(crc32Bytes))
+		if (crc32 == unpackValue<uint32_t>(crc32Bytes))
 		{
 			// The sender may have been built with message types this end doesn't know
 			Receive_Message_Type messageType = Receive_Message_Type::MIN;
