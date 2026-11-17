@@ -102,6 +102,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **A value used once, whose name adds nothing, goes straight into the call.** Declaring it first hides that it's used only once. Name it only when the name explains something the expression doesn't.
 - **An early `return` is for a failure or guard.** When two branches are both normal outcomes, use `if`/`else`, so neither reads as an error.
 - **Never `while (true)`.** Put the real condition in the `while`.
+- **Write code the way the task is thought of.** Nobody thinks of packing a value as a loop: it's putting each byte in its place. So a small, fixed number of steps that won't change is written out, one line each. A loop adds a mechanism the intent doesn't have.
 - **Where a line sits shows intent.** A line inside a loop says it may change on each pass, so anything that stays the same for the whole loop goes before it.
 - **Wrap ring indexes with increment-and-if, not modulo**, as modulo is slow on 8-bit MCUs. The exception is a compile-time constant divisor, which the compiler optimises.
 - **Initialise every struct member** (`= {}`), since C structs can hold garbage.
