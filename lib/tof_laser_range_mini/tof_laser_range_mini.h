@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include "common.data.packing.h"
 
 /// @brief Base class for the Waveshare TOF Laser Range Sensor Mini (a Nooploop TOFSense-F2 Mini)
 /// @brief Holds Nooploop's NLink TOFSense protocol, shared by the versions that receive it in different ways
@@ -189,37 +190,26 @@ protected:
 		return (static_cast<uint32_t>(size) * BITS_PER_UART_BYTE * MICROS_PER_SECOND) / baudRate;
 	}
 
-	/// @brief Unpack a little-endian field from a frame
-	/// @tparam T The field's type
-	/// @param frame The frame
-	/// @param fieldIndex The field's index within the frame
-	/// @param size The field's size in the frame (bytes), up to the size of T. Defaults to the size of T
-	/// @return The field's value
-	template <typename T>
-	static T unpackField(const uint8_t *const frame, const uint8_t fieldIndex, const uint8_t size = sizeof(T))
+	/// @brief Unpack a little-endian 24-bit value from 3 bytes
+	/// @brief e.g. 0x56, 0x34, 0x12 gives 0x123456
+	/// @param bytes The 3 bytes, least significant first
+	/// @return The value, up to 0xFFFFFF
+	static uint32_t unpackUInt24(const uint8_t *const bytes)
 	{
-		constexpr uint8_t BITS_PER_BYTE = 8;
-
-		T value = 0;
-		for (uint8_t byteIndex = 0; byteIndex < size; ++byteIndex)
-			value |= static_cast<T>(static_cast<T>(frame[fieldIndex + byteIndex]) << (BITS_PER_BYTE * byteIndex));
-
-		return value;
+		return static_cast<uint32_t>(bytes[0]) |
+			   (static_cast<uint32_t>(bytes[1]) << 8) |
+			   (static_cast<uint32_t>(bytes[2]) << 16);
 	}
 
-	/// @brief Pack a little-endian field into a frame
-	/// @tparam T The field's type
-	/// @param frame The frame
-	/// @param fieldIndex The field's index within the frame
-	/// @param value The field's value
-	/// @param size The field's size in the frame (bytes), up to the size of T. Defaults to the size of T
-	template <typename T>
-	static void packField(uint8_t *const frame, const uint8_t fieldIndex, const T value, const uint8_t size = sizeof(T))
+	/// @brief Pack a 24-bit value into 3 bytes, little-endian. Only the value's low 3 bytes are packed
+	/// @brief e.g. 0x123456 gives 0x56, 0x34, 0x12
+	/// @param bytes Where the 3 bytes go, least significant first
+	/// @param value The value, up to 0xFFFFFF
+	static void packUInt24(uint8_t *const bytes, const uint32_t value)
 	{
-		constexpr uint8_t BITS_PER_BYTE = 8;
-
-		for (uint8_t byteIndex = 0; byteIndex < size; ++byteIndex)
-			frame[fieldIndex + byteIndex] = static_cast<uint8_t>(value >> (BITS_PER_BYTE * byteIndex));
+		bytes[0] = static_cast<uint8_t>(value);
+		bytes[1] = static_cast<uint8_t>(value >> 8);
+		bytes[2] = static_cast<uint8_t>(value >> 16);
 	}
 
 	/// @brief Calculate a settings mode value with an output mode applied, by setting or clearing its output mode bit
@@ -283,10 +273,10 @@ protected:
 		frame[F_SETTING_FRAME0_MIX_INDEX] = 0; // MIX_BIT_MIX clear: a write
 		frame[F_SETTING_FRAME0_ID_INDEX] = settings.id;
 		frame[F_SETTING_FRAME0_MODE_INDEX] = settings.mode;
-		packField<uint32_t>(frame, F_SETTING_FRAME0_UART_BAUDRATE_INDEX, settings.uartBaudRate, 3); // uint24 in the frame
-		packField<uint16_t>(frame, F_SETTING_FRAME0_BAND_START_INDEX, settings.bandStart);
-		packField<uint16_t>(frame, F_SETTING_FRAME0_BAND_WIDTH_INDEX, settings.bandWidth);
-		packField<uint16_t>(frame, F_SETTING_FRAME0_REFRESH_RATE_INDEX, settings.refreshRate);
+		packUInt24(&frame[F_SETTING_FRAME0_UART_BAUDRATE_INDEX], settings.uartBaudRate);
+		packValue<uint16_t>(&frame[F_SETTING_FRAME0_BAND_START_INDEX], settings.bandStart);
+		packValue<uint16_t>(&frame[F_SETTING_FRAME0_BAND_WIDTH_INDEX], settings.bandWidth);
+		packValue<uint16_t>(&frame[F_SETTING_FRAME0_REFRESH_RATE_INDEX], settings.refreshRate);
 		frame[F_SETTING_FRAME0_FILTER_FACTOR_INDEX] = settings.filterFactor;
 		frame[F_SETTING_FRAME0_SUM_CHECK_INDEX] = calcSumCheck(frame, F_SETTING_FRAME0_SIZE, F_SETTING_FRAME0_SUM_CHECK_INDEX);
 	}
@@ -329,12 +319,12 @@ protected:
 	static Measurement parseMeasurement(const uint8_t (&frame)[FRAME0_SIZE])
 	{
 		Measurement measurement;
-		measurement.id = unpackField<uint8_t>(frame, FRAME0_ID_INDEX);
-		measurement.systemTime = unpackField<uint32_t>(frame, FRAME0_SYSTEM_TIME_INDEX);
-		measurement.distance = unpackField<uint32_t>(frame, FRAME0_DIS_INDEX, 3); // uint24 in the frame
-		measurement.distanceStatus = unpackField<uint8_t>(frame, FRAME0_DIS_STATUS_INDEX);
-		measurement.signalStrength = unpackField<uint16_t>(frame, FRAME0_SIGNAL_STRENGTH_INDEX);
-		measurement.rangePrecision = unpackField<uint8_t>(frame, FRAME0_RANGE_PRECISION_INDEX);
+		measurement.id = unpackValue<uint8_t>(&frame[FRAME0_ID_INDEX]);
+		measurement.systemTime = unpackValue<uint32_t>(&frame[FRAME0_SYSTEM_TIME_INDEX]);
+		measurement.distance = unpackUInt24(&frame[FRAME0_DIS_INDEX]);
+		measurement.distanceStatus = unpackValue<uint8_t>(&frame[FRAME0_DIS_STATUS_INDEX]);
+		measurement.signalStrength = unpackValue<uint16_t>(&frame[FRAME0_SIGNAL_STRENGTH_INDEX]);
+		measurement.rangePrecision = unpackValue<uint8_t>(&frame[FRAME0_RANGE_PRECISION_INDEX]);
 
 		return measurement;
 	}
@@ -345,14 +335,14 @@ protected:
 	static Settings parseSettings(const uint8_t (&frame)[F_SETTING_FRAME0_SIZE])
 	{
 		Settings settings;
-		settings.id = unpackField<uint8_t>(frame, F_SETTING_FRAME0_ID_INDEX);
-		settings.systemTime = unpackField<uint32_t>(frame, F_SETTING_FRAME0_SYSTEM_TIME_INDEX);
-		settings.mode = unpackField<uint8_t>(frame, F_SETTING_FRAME0_MODE_INDEX);
-		settings.uartBaudRate = unpackField<uint32_t>(frame, F_SETTING_FRAME0_UART_BAUDRATE_INDEX, 3); // uint24 in the frame
-		settings.bandStart = unpackField<uint16_t>(frame, F_SETTING_FRAME0_BAND_START_INDEX);
-		settings.bandWidth = unpackField<uint16_t>(frame, F_SETTING_FRAME0_BAND_WIDTH_INDEX);
-		settings.refreshRate = unpackField<uint16_t>(frame, F_SETTING_FRAME0_REFRESH_RATE_INDEX);
-		settings.filterFactor = unpackField<uint8_t>(frame, F_SETTING_FRAME0_FILTER_FACTOR_INDEX);
+		settings.id = unpackValue<uint8_t>(&frame[F_SETTING_FRAME0_ID_INDEX]);
+		settings.systemTime = unpackValue<uint32_t>(&frame[F_SETTING_FRAME0_SYSTEM_TIME_INDEX]);
+		settings.mode = unpackValue<uint8_t>(&frame[F_SETTING_FRAME0_MODE_INDEX]);
+		settings.uartBaudRate = unpackUInt24(&frame[F_SETTING_FRAME0_UART_BAUDRATE_INDEX]);
+		settings.bandStart = unpackValue<uint16_t>(&frame[F_SETTING_FRAME0_BAND_START_INDEX]);
+		settings.bandWidth = unpackValue<uint16_t>(&frame[F_SETTING_FRAME0_BAND_WIDTH_INDEX]);
+		settings.refreshRate = unpackValue<uint16_t>(&frame[F_SETTING_FRAME0_REFRESH_RATE_INDEX]);
+		settings.filterFactor = unpackValue<uint8_t>(&frame[F_SETTING_FRAME0_FILTER_FACTOR_INDEX]);
 
 		return settings;
 	}
