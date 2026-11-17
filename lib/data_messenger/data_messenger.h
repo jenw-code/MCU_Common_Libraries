@@ -50,7 +50,7 @@ struct CRC32_Table final
 	}
 };
 
-/// @brief Used to organise transmitting and receiving data from one mcu to another over a serial link. It
+/// @brief Used to organise transmitting and receiving data from one MCU to another over a serial link. It
 /// @brief decides when everything happens; its comms knows how to do it on its MCU
 /// @tparam Comms The MCU's comms (e.g. RP235x_Data_Messenger_Comms): the MCU-specific part that carries out what
 /// 		the messenger decides. It sends and receives bytes over its serial link in the background, signals and watches
@@ -69,16 +69,16 @@ public:
 	/// @brief The errors a messenger reports
 	enum class Error : uint8_t
 	{
-		None = 0,				// No error since the last report
-		SendAsyncMessageFail,	// Async message failed to send
-		ReceivedMessageDropped, // A message arrived before the last one was handled
-		InvalidStartByte,		// A frame didn't start with a header
-		UnknownMessageType,		// The message's type is outside the receive message types' MIN to MAX
-		PayloadMaxSizeExceeded, // The header announced more than the largest payload that can be received
-		InvalidCRC,				// The message failed its CRC check
-		UnknownPayloadType,		// The message's payload type is neither parameters nor a payload
-		NoPayloadCallback,		// A payload arrived, but no payload callback was set up
-		InvalidParameters,		// The message's parameters couldn't be parsed
+		None = 0,				  // No error since the last report
+		SendAsyncMessageFail,	  // Async message failed to send
+		ReceivedMessageDropped,	  // A message arrived before the last one was handled
+		InvalidStartByte,		  // A frame didn't start with a header
+		UnknownMessageType,		  // The message's type is outside the receive message types' MIN to MAX
+		PayloadMaxSizeExceeded,	  // The header announced more than the largest payload that can be received
+		InvalidCRC,				  // The message failed its CRC check
+		UnknownPayloadType,		  // The message's payload type is neither parameters nor a payload
+		PayloadCallbackUndefined, // A payload arrived, but no payload callback was set up
+		InvalidParameters,		  // The message's parameters couldn't be parsed
 	};
 
 	// Called with each error, from process
@@ -783,26 +783,15 @@ private:
 		const uint8_t *header = _receivedMessage.oneStepBuffer;
 		const uint32_t payloadSize = unpackValue<uint32_t>(&header[PAYLOAD_SIZE_INDEX]);
 
-		// A one-step payload and its CRC follow the header; a two-step payload
-		// and its CRC were received into their own buffer
-		const uint8_t *payload = nullptr;
-		const uint8_t *crc32Bytes = nullptr;
+		// Get the payload (this will depend if it's one-step or two-step)
+		const uint8_t *payload = (payloadSize <= MAX_ONE_STEP_PAYLOAD_SIZE)
+									 ? &header[HEADER_SIZE]					  // One-step
+									 : _receivedMessage.twoStepPayloadBuffer; // Two-step
 
-		if (payloadSize == 0)
-			crc32Bytes = &header[HEADER_SIZE];
+		// Get the CRC. This is the last value in the message (at the end of the payload)
+		const uint8_t *crc32Bytes = &payload[payloadSize];
 
-		else if (payloadSize <= MAX_ONE_STEP_PAYLOAD_SIZE)
-		{
-			payload = &header[HEADER_SIZE];
-			crc32Bytes = &payload[payloadSize];
-		}
-		else
-		{
-			payload = _receivedMessage.twoStepPayloadBuffer;
-			crc32Bytes = &payload[payloadSize];
-		}
-
-		// The CRC covers the header and the payload, as one message
+		// Calculate the CRC from the data received and see if it matches the CRC in the message
 		const uint32_t headerCRC32 = calcCRC32(header, HEADER_SIZE);
 		const uint32_t crc32 = calcCRC32(payload, payloadSize, headerCRC32);
 
@@ -814,6 +803,7 @@ private:
 				logValue(F("Messenger received. Message type = "), header[MESSAGE_TYPE_INDEX]);
 				logValue(F("Messenger received. Payload size = "), payloadSize);
 
+				// Unpack (and validate) message data based on payload type
 				switch (static_cast<Payload_Type>(header[PAYLOAD_TYPE_INDEX]))
 				{
 				case Payload_Type::Parameterised:
@@ -822,7 +812,7 @@ private:
 					else
 					{
 						Parameter parameters[MAX_PARAMETER_COUNT];
-						uint8_t parameterCount = 0;
+						uint8_t parameterCount;
 
 						if (unpackParameters(payload, payloadSize, parameters, parameterCount))
 							_receiveCallback(messageType, parameters, parameterCount);
@@ -835,7 +825,7 @@ private:
 					if (_receivePayloadCallback != nullptr)
 						_receivePayloadCallback(messageType, payload, payloadSize);
 					else
-						triggerErrorCallback(Error::NoPayloadCallback);
+						triggerErrorCallback(Error::PayloadCallbackUndefined);
 					break;
 
 				default:
