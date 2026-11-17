@@ -1,6 +1,7 @@
 #pragma once
 
 #include <Arduino.h>
+#include <type_traits>
 #include "common.debug.h"
 #include "common.data.packing.h"
 #include "common.parse.h"
@@ -75,18 +76,167 @@ public:
 		UnknownMessageType,		// The message's type is outside the receive message types' MIN to MAX
 		PayloadMaxSizeExceeded, // The header announced more than the largest payload that can be received
 		InvalidCRC,				// The message failed its CRC check
+		UnknownPayloadType,		// The message's payload type is neither parameters nor a payload
+		NoPayloadCallback,		// A payload arrived, but no payload callback was set up
+		InvalidParameters,		// The message's parameters couldn't be parsed
 	};
 
 	// Called with each error, from process
 	typedef void (*On_Error_Callback)(const Error error);
 
-	// Called with each valid message received. payload is nullptr when payloadSize is 0
-	typedef void (*On_Receive_Callback)(const Receive_Message_Type messageType, const uint8_t *payload,
-										const uint32_t payloadSize);
+	// Called with each async sent message
+	typedef void (*On_Sent_Callback)(const Send_Message_Type messageType);
 
-	// Called with each async sent message. payload is nullptr when payloadSize is 0
-	typedef void (*On_Sent_Callback)(const Send_Message_Type messageType, const uint8_t *payload,
-									 const uint32_t payloadSize);
+	/// @brief One parameter of a parameterised message. Each is built from a plain value, so an array of
+	/// @brief parameters can be written as plain values, e.g. { count, enabled, ratio }
+	class Parameter final
+	{
+	private:
+		// The messenger packs and unpacks parameters, so it reads them directly
+		friend class Data_Messenger;
+
+		/// @brief The type of a parameter's value, sent before the value in a parameterised payload
+		enum class Value_Type : uint8_t
+		{
+			Unknown = 0, // Not set yet, e.g. a received parameter before it's decoded
+			Bool,
+			Uint8,
+			Uint16,
+			Uint32,
+			Float
+		};
+
+		/// @brief Get the value type a value is sent as
+		/// @brief e.g. uint16_t gives Uint16
+		/// @tparam T The value's type: bool, uint8_t, uint16_t, uint32_t or float
+		/// @return The value type
+		template <typename T>
+		static constexpr Value_Type toValueType()
+		{
+			if constexpr (std::is_same_v<T, bool>)
+				return Value_Type::Bool;
+
+			else if constexpr (std::is_same_v<T, uint8_t>)
+				return Value_Type::Uint8;
+
+			else if constexpr (std::is_same_v<T, uint16_t>)
+				return Value_Type::Uint16;
+
+			else if constexpr (std::is_same_v<T, uint32_t>)
+				return Value_Type::Uint32;
+
+			else if constexpr (std::is_same_v<T, float>)
+				return Value_Type::Float;
+
+			else
+				static_assert(sizeof(T) == 0, "Unsupported parameter type");
+		}
+
+		/// @brief A parameter's value, as any of the value types. Sized by the compiler for the largest
+		union Value
+		{
+			bool boolValue;
+			uint8_t uint8Value;
+			uint16_t uint16Value;
+			uint32_t uint32Value;
+			float floatValue;
+
+			// The largest member is zeroed, so every byte has a known value before a value is set
+			Value() : uint32Value(0) {}
+
+			// One per value type, so a Parameter can set the member that matches its value type
+			Value(const bool value) : boolValue(value) {}
+			Value(const uint8_t value) : uint8Value(value) {}
+			Value(const uint16_t value) : uint16Value(value) {}
+			Value(const uint32_t value) : uint32Value(value) {}
+			Value(const float value) : floatValue(value) {}
+		};
+
+		Value_Type _valueType;
+		Value _value;
+
+		/// @brief Create an empty parameter, for the messenger to set once it decodes a received value
+		Parameter() : _valueType(Value_Type::Unknown), _value() {}
+
+		/// @brief Set the parameter's value, with the value type that matches it
+		/// @tparam T The value's type: bool, uint8_t, uint16_t, uint32_t or float
+		/// @param value The value
+		template <typename T>
+		void set(const T value)
+		{
+			_valueType = toValueType<T>();
+			_value = Value(value);
+		}
+
+		/// @brief Get the packed size of the parameter's value
+		/// @brief e.g. a uint16_t parameter gives 2
+		/// @return The value's packed size (bytes), or 0 if the value type isn't known
+		uint8_t getValueSize() const
+		{
+			switch (_valueType)
+			{
+			case Value_Type::Bool:
+				return sizeof(uint8_t); // A bool is packed as one byte
+			case Value_Type::Uint8:
+				return sizeof(uint8_t);
+			case Value_Type::Uint16:
+				return sizeof(uint16_t);
+			case Value_Type::Uint32:
+				return sizeof(uint32_t);
+			case Value_Type::Float:
+				return sizeof(float);
+			default:
+				return 0;
+			}
+		}
+
+	public:
+		/// @brief Create a parameter from a value, with the value type that matches it
+		/// @tparam T The value's type: bool, uint8_t, uint16_t, uint32_t or float
+		/// @param value The value
+		template <typename T>
+		Parameter(const T value) : _valueType(toValueType<T>()), _value(value) {}
+
+		/// @brief Get the parameter's value
+		/// @tparam T The parameter's type: bool, uint8_t, uint16_t, uint32_t or float
+		/// @param value Receives the value. Only changed if T is the parameter's type
+		/// @return True if T is the parameter's type
+		template <typename T>
+		bool getValue(T &value) const
+		{
+			// T must be the same type as the parameter value
+			if (_valueType == toValueType<T>())
+			{
+				if constexpr (std::is_same_v<T, bool>)
+					value = _value.boolValue;
+
+				else if constexpr (std::is_same_v<T, uint8_t>)
+					value = _value.uint8Value;
+
+				else if constexpr (std::is_same_v<T, uint16_t>)
+					value = _value.uint16Value;
+
+				else if constexpr (std::is_same_v<T, uint32_t>)
+					value = _value.uint32Value;
+
+				else if constexpr (std::is_same_v<T, float>)
+					value = _value.floatValue;
+
+				return true;
+			}
+
+			return false;
+		}
+	};
+
+	// Called with each valid message received. parameters is nullptr when parameterCount is 0, and the parameters
+	// are only valid during the call
+	typedef void (*On_Receive_Callback)(const Receive_Message_Type messageType, const Parameter *parameters,
+										const uint8_t parameterCount);
+
+	// Called with each valid payload received. payload is nullptr when payloadSize is 0
+	typedef void (*On_Receive_Payload_Callback)(const Receive_Message_Type messageType, const uint8_t *payload,
+												const uint32_t payloadSize);
 
 private:
 	static constexpr uint8_t FRAME_BUFFER_SIZE = 64;
@@ -163,15 +313,16 @@ private:
 		Parameterised // A list of parameters, each a value type followed by its value
 	};
 
-	/// @brief The type of a parameter's value, sent before the value in a parameterised payload
-	enum class Parameter_Value_Type : uint8_t
-	{
-		Bool = 0, // 1 byte
-		Uint8,	  // 1 byte
-		Uint16,	  // 2 bytes
-		Uint32,	  // 4 bytes
-		Float	  // 4 bytes
-	};
+	// Parameter layout
+	static constexpr uint8_t PARAMETER_VALUE_TYPE_INDEX = 0;
+	static constexpr uint8_t PARAMETER_VALUE_INDEX = PARAMETER_VALUE_TYPE_INDEX + sizeof(typename Parameter::Value_Type);
+
+	static constexpr uint8_t MAX_PARAMETER_COUNT = 8;
+	static constexpr uint8_t MAX_PARAMETER_SIZE = PARAMETER_VALUE_INDEX + sizeof(typename Parameter::Value);
+
+	// Parameterised messages are always sent in one step
+	static_assert(MAX_PARAMETER_COUNT * MAX_PARAMETER_SIZE <= MAX_ONE_STEP_PAYLOAD_SIZE,
+				  "The maximum count of parameters must fit within a one-step payload");
 
 	Comms &_comms;
 
@@ -183,6 +334,7 @@ private:
 	volatile Error _lastError = Error::None;
 
 	On_Receive_Callback _receiveCallback = nullptr;
+	On_Receive_Payload_Callback _receivePayloadCallback = nullptr;
 	On_Error_Callback _errorCallback = nullptr;
 
 	RX_Message_Buffers _receivedMessage = {};
@@ -232,19 +384,124 @@ private:
 	void triggerSentCallback(const TX_Message_Async &sentMessage)
 	{
 		if (sentMessage.callback != nullptr)
-			sentMessage.callback(sentMessage.messageType, sentMessage.payload, sentMessage.payloadSize);
+			sentMessage.callback(sentMessage.messageType);
+	}
+
+	/// @brief Pack parameters into bytes, in the order given, each as its value type followed by its value
+	/// @brief e.g. the uint8_t 5 then the bool true give 0x02, 0x05, 0x01, 0x01
+	/// @param bytes Where the parameters go. There must be room for every parameter's value type and value
+	/// @param parameters The parameters
+	/// @param parameterCount Number of parameters, up to MAX_PARAMETER_COUNT
+	/// @return The packed parameters' size (bytes)
+	static uint32_t packParameters(uint8_t *const bytes, const Parameter *const parameters, const uint8_t parameterCount)
+	{
+		uint32_t packedSize = 0;
+
+		for (uint8_t parameterIndex = 0; parameterIndex < parameterCount; ++parameterIndex)
+		{
+			const Parameter &parameter = parameters[parameterIndex];
+			uint8_t *parameterBytes = &bytes[packedSize];
+
+			parameterBytes[PARAMETER_VALUE_TYPE_INDEX] = static_cast<uint8_t>(parameter._valueType);
+
+			uint8_t *valueBytes = &parameterBytes[PARAMETER_VALUE_INDEX];
+			switch (parameter._valueType)
+			{
+			case Parameter::Value_Type::Unknown:
+				// Nothing to pack - this should never be reached
+				break;
+			case Parameter::Value_Type::Bool:
+				packValue(valueBytes, parameter._value.boolValue);
+				break;
+			case Parameter::Value_Type::Uint8:
+				packValue(valueBytes, parameter._value.uint8Value);
+				break;
+			case Parameter::Value_Type::Uint16:
+				packValue(valueBytes, parameter._value.uint16Value);
+				break;
+			case Parameter::Value_Type::Uint32:
+				packValue(valueBytes, parameter._value.uint32Value);
+				break;
+			case Parameter::Value_Type::Float:
+				packValue(valueBytes, parameter._value.floatValue);
+				break;
+			}
+
+			packedSize += PARAMETER_VALUE_INDEX + parameter.getValueSize();
+		}
+
+		return packedSize;
+	}
+
+	/// @brief Unpack a received payload of parameters, each a value type followed by its value
+	/// @brief e.g. 0x02, 0x05, 0x01, 0x01 gives a uint8_t parameter of 5 then a bool parameter of true
+	/// @param payload The payload
+	/// @param payloadSize The payload's size (bytes)
+	/// @param parameters Receives the parameters. There must be room for MAX_PARAMETER_COUNT
+	/// @param parameterCount Receives the number of parameters. Only changed if the payload is parsed
+	/// @return True if every value type is known, there are no more than MAX_PARAMETER_COUNT parameters, and the
+	/// 		last one ends exactly at the payload's end
+	static bool unpackParameters(const uint8_t *const payload, const uint32_t payloadSize,
+								 Parameter *const parameters, uint8_t &parameterCount)
+	{
+		// A value is unpacked before its size is known, so the last one can read past the payload's end. The CRC
+		// always follows the payload, so the read stays within the message
+		static_assert(sizeof(typename Parameter::Value) <= CRC32_SIZE, "A value must fit within the CRC");
+
+		uint8_t foundCount = 0;
+		uint32_t payloadByteIndex = 0;
+
+		while ((payloadByteIndex < payloadSize) && (foundCount < MAX_PARAMETER_COUNT))
+		{
+			const uint8_t *parameterBytes = &payload[payloadByteIndex];
+			const uint8_t *valueBytes = &parameterBytes[PARAMETER_VALUE_INDEX];
+			Parameter &parameter = parameters[foundCount];
+
+			switch (static_cast<typename Parameter::Value_Type>(parameterBytes[PARAMETER_VALUE_TYPE_INDEX]))
+			{
+			case Parameter::Value_Type::Bool:
+				parameter.set(unpackValue<bool>(valueBytes));
+				break;
+			case Parameter::Value_Type::Uint8:
+				parameter.set(unpackValue<uint8_t>(valueBytes));
+				break;
+			case Parameter::Value_Type::Uint16:
+				parameter.set(unpackValue<uint16_t>(valueBytes));
+				break;
+			case Parameter::Value_Type::Uint32:
+				parameter.set(unpackValue<uint32_t>(valueBytes));
+				break;
+			case Parameter::Value_Type::Float:
+				parameter.set(unpackValue<float>(valueBytes));
+				break;
+			default:
+				return false; // Unknown, or not a value type
+			}
+
+			payloadByteIndex += PARAMETER_VALUE_INDEX + parameter.getValueSize();
+			++foundCount;
+		}
+
+		if (payloadByteIndex != payloadSize)
+			return false;
+
+		parameterCount = foundCount;
+		return true;
 	}
 
 	/// @brief Send a message (header and payload) small enough for the receiver's frame buffer as one frame.
 	/// @brief A CRC is also appended to the end of the message to help validate the data was sent successfully
 	/// @param messageType The message's type
 	/// @param payloadType How the payload's bytes are laid out
-	/// @param payload The payload's bytes
-	/// @param payloadSize Number of payload bytes, up to MAX_ONE_STEP_PAYLOAD_SIZE
+	/// @param payload The payload's bytes, or nullptr when sending parameters
+	/// @param payloadSize Number of payload bytes, up to MAX_ONE_STEP_PAYLOAD_SIZE, or 0 when sending parameters
+	/// @param parameters The parameters, or nullptr when sending a payload
+	/// @param parameterCount Number of parameters, up to MAX_PARAMETER_COUNT, or 0 when sending a payload
 	/// @param callback Called from process once an async send has been sent, or nullptr if the caller waits for it
 	/// @return True if sending started
-	bool sendOneStep(const Send_Message_Type messageType,
-					 const Payload_Type payloadType, const uint8_t *payload, const uint32_t payloadSize,
+	bool sendOneStep(const Send_Message_Type messageType, const Payload_Type payloadType,
+					 const uint8_t *payload, const uint32_t payloadSize,
+					 const Parameter *const parameters, const uint8_t parameterCount,
 					 const On_Sent_Callback callback)
 	{
 		// Built in permanent memory, not a local array: the comms is still sending from it after
@@ -253,13 +510,25 @@ private:
 		bytes[HEADER_START_BYTE_INDEX] = HEADER_START_BYTE;
 		bytes[MESSAGE_TYPE_INDEX] = static_cast<uint8_t>(messageType);
 		bytes[PAYLOAD_TYPE_INDEX] = static_cast<uint8_t>(payloadType);
-		packValue(&bytes[PAYLOAD_SIZE_INDEX], payloadSize);
 
-		// memcpy is undefined for a nullptr source, even when copying nothing
-		if (payloadSize > 0)
-			memcpy(&bytes[HEADER_SIZE], payload, payloadSize);
+		// The payload size goes in the header once it's known, as parameters only have a size once packed
+		uint32_t framePayloadSize = 0;
 
-		const uint32_t headerAndPayloadSize = HEADER_SIZE + payloadSize;
+		if (payloadType == Payload_Type::Parameterised)
+			framePayloadSize = packParameters(&bytes[HEADER_SIZE], parameters, parameterCount);
+
+		else
+		{
+			// memcpy is undefined for a nullptr source, even when copying nothing
+			if (payloadSize > 0)
+				memcpy(&bytes[HEADER_SIZE], payload, payloadSize);
+
+			framePayloadSize = payloadSize;
+		}
+
+		packValue(&bytes[PAYLOAD_SIZE_INDEX], framePayloadSize);
+
+		const uint32_t headerAndPayloadSize = HEADER_SIZE + framePayloadSize;
 
 		// Calc and append the crc32
 		const uint32_t crc32 = calcCRC32(bytes, headerAndPayloadSize);
@@ -349,16 +618,18 @@ private:
 		return true;
 	}
 
-	/// @brief Send a message, in one step or two by its payload size
+	/// @brief Send a message, in one step or two by its payload size. Parameters always fit in one step
 	/// @param messageType The message's type
-	/// @param payloadType How the payload's bytes are laid out
-	/// @param payload The payload's bytes
-	/// @param payloadSize Number of payload bytes, up to MAX_TWO_STEP_PAYLOAD_SIZE
+	/// @param payload The payload's bytes, or nullptr when sending parameters
+	/// @param payloadSize Number of payload bytes, up to MAX_TWO_STEP_PAYLOAD_SIZE, or 0 when sending parameters
+	/// @param parameters The parameters, or nullptr when sending a payload
+	/// @param parameterCount Number of parameters, up to MAX_PARAMETER_COUNT, or 0 when sending a payload
 	/// @param callback Called from process once an async send has been sent, or nullptr to return only once every
 	/// 		byte has been sent
 	/// @return True if sent, or for an async send, started. False if not (e.g. an async send is still in progress)
 	bool send(const Send_Message_Type messageType,
-			  const Payload_Type payloadType, const uint8_t *payload, const uint32_t payloadSize,
+			  const uint8_t *payload, const uint32_t payloadSize,
+			  const Parameter *const parameters, const uint8_t parameterCount,
 			  const On_Sent_Callback callback)
 	{
 		if (payloadSize > MAX_TWO_STEP_PAYLOAD_SIZE)
@@ -369,20 +640,28 @@ private:
 			return false;
 
 		logValue(F("Messenger sending. Message type = "), static_cast<uint8_t>(messageType));
-		logValue(F("Messenger sending. Payload size = "), payloadSize);
+
+		const Payload_Type payloadType = (payloadSize > 0) ? Payload_Type::Raw : Payload_Type::Parameterised;
+
+		if (payloadType == Payload_Type::Parameterised)
+			logValue(F("Messenger sending. Parameter count = "), parameterCount);
+		else
+			logValue(F("Messenger sending. Payload size = "), payloadSize);
 
 		_comms.startSendFrame();
 
-		// Decide whether it will be sent in one or two steps - this is done purely by payload size
-		if (payloadSize <= MAX_ONE_STEP_PAYLOAD_SIZE)
+		// Decide whether it will be sent in one or two steps. Parameters should always fit in one step
+		if ((payloadType == Payload_Type::Parameterised) || (payloadSize <= MAX_ONE_STEP_PAYLOAD_SIZE))
 		{
-			if (!sendOneStep(messageType, payloadType, payload, payloadSize, callback))
+			if (!sendOneStep(messageType, payloadType, payload, payloadSize, parameters, parameterCount, callback))
 			{
 				_comms.stopSendFrame();
 				return false;
 			}
 		}
-		else if (!sendTwoStep(messageType, payloadType, payload, payloadSize, callback))
+		// If we have parameters (which shouldn't be possible at this point) return false.
+		// We only support parameters in one step
+		else if ((parameterCount > 0) || !sendTwoStep(messageType, payloadType, payload, payloadSize, callback))
 		{
 			_comms.stopSendFrame();
 			return false;
@@ -464,85 +743,10 @@ private:
 		static_cast<Data_Messenger *>(messenger)->handleReceiveFrameChange();
 	}
 
-public:
-	/// @brief Create a messenger that sends and receives through a comms
-	/// @param comms The comms, created with its MCU's config. It must outlive the messenger
-	explicit Data_Messenger(Comms &comms) : _comms(comms) {}
-
-	~Data_Messenger()
+	/// @brief Finish an async send once its payload has gone: send a two-step message's CRC, end the frame, and
+	/// @brief report it sent
+	void processSent()
 	{
-		if (_receivedMessage.twoStepPayloadBuffer != nullptr)
-		{
-			_comms.releasePayloadBuffer(_receivedMessage.twoStepPayloadBuffer);
-			_receivedMessage.twoStepPayloadBuffer = nullptr;
-		}
-	}
-
-	/// @brief Set up the messenger and its comms
-	/// @param receiveCallback Called with each valid message received. Required
-	/// @param errorCallback Called with each error. Optional: nullptr if errors aren't wanted
-	/// @return True if set up, false if there's no receive callback, the comms couldn't be set up, or the payload
-	/// 		buffer couldn't be reserved
-	bool setup(const On_Receive_Callback receiveCallback, const On_Error_Callback errorCallback = nullptr)
-	{
-		if (receiveCallback == nullptr)
-			return false;
-
-		// The comms is set up first, as it checks everything the buffer below relies on (e.g. PSRAM being fitted)
-		if (!_comms.setup())
-			return false;
-
-		// The CRC follows the payload into the same buffer
-		_receivedMessage.twoStepPayloadBuffer = _comms.reservePayloadBuffer(MAX_TWO_STEP_PAYLOAD_SIZE + CRC32_SIZE);
-		if (_receivedMessage.twoStepPayloadBuffer == nullptr)
-			return false;
-
-		// Anything received while setting up isn't part of a frame
-		_comms.clearRXFIFO();
-
-		_receiveCallback = receiveCallback;
-		_errorCallback = errorCallback;
-
-		// Attached once everything the interrupt uses is set up, so the first frame can be handled
-		_comms.attachReceiveFrameInterrupt(receiveFrameInterrupt, this);
-
-		return true;
-	}
-
-	/// @brief Send a message. Returns once every byte has been sent, so the payload can be changed straight away
-	/// @param messageType The message's type
-	/// @param payload The payload's bytes
-	/// @param payloadSize Number of payload bytes
-	/// @return True if sent, false if not (e.g. the payload is too big)
-	bool send(const Send_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
-	{
-		return send(messageType, Payload_Type::Raw, payload, payloadSize, nullptr);
-	}
-
-	/// @brief Send a message in the background. Returns once sending has started; process finishes it
-	/// @param messageType The message's type
-	/// @param payload The payload's bytes. They must stay unchanged until callback is called
-	/// @param payloadSize Number of payload bytes
-	/// @param callback Called from process once every byte has been sent. Required
-	/// @return True if sending started, false if not (e.g. an async send is still in progress)
-	bool sendAsync(const Send_Message_Type messageType, const uint8_t *payload,
-				   const uint32_t payloadSize, const On_Sent_Callback callback)
-	{
-		return (callback != nullptr) && send(messageType, Payload_Type::Raw, payload, payloadSize, callback);
-	}
-
-	/// @brief Process internal events i.e. check for a received message, check if an async send has completed.
-	/// @brief Errors, including an invalid message, are reported through the error callback
-	void process()
-	{
-		// Errors found by the interrupt are reported here, as the callback can't be called from an interrupt.
-		// Note: Errors relate to frames that were rejected, not a message being held, so checking message received still happens
-		if (_lastError != Error::None)
-		{
-			triggerErrorCallback(_lastError);
-			_lastError = Error::None;
-		}
-
 		// Check if there's an async message that has finished sending its payload.
 		// If there is, the final thing to do for a two-step message is to send its CRC32
 		if ((_messageSendingAsync.callback != nullptr) && !_comms.sendingBytes())
@@ -567,7 +771,12 @@ public:
 				triggerSentCallback(sentMessage);
 			}
 		}
+	}
 
+	/// @brief Validate a received message and pass it to the callback for its payload type. Anything invalid is
+	/// @brief reported through the error callback
+	void processReceived()
+	{
 		if (!_messageReceived)
 			return;
 
@@ -599,14 +808,40 @@ public:
 
 		if (crc32 == unpackValue<uint32_t>(crc32Bytes))
 		{
-			// The sender may have been built with message types this end doesn't know
 			Receive_Message_Type messageType = Receive_Message_Type::MIN;
 			if (parseEnum(header[MESSAGE_TYPE_INDEX], messageType))
 			{
 				logValue(F("Messenger received. Message type = "), header[MESSAGE_TYPE_INDEX]);
 				logValue(F("Messenger received. Payload size = "), payloadSize);
 
-				_receiveCallback(messageType, payload, payloadSize);
+				switch (static_cast<Payload_Type>(header[PAYLOAD_TYPE_INDEX]))
+				{
+				case Payload_Type::Parameterised:
+					if (payloadSize == 0)
+						_receiveCallback(messageType, nullptr, 0);
+					else
+					{
+						Parameter parameters[MAX_PARAMETER_COUNT];
+						uint8_t parameterCount = 0;
+
+						if (unpackParameters(payload, payloadSize, parameters, parameterCount))
+							_receiveCallback(messageType, parameters, parameterCount);
+						else
+							triggerErrorCallback(Error::InvalidParameters);
+					}
+					break;
+
+				case Payload_Type::Raw:
+					if (_receivePayloadCallback != nullptr)
+						_receivePayloadCallback(messageType, payload, payloadSize);
+					else
+						triggerErrorCallback(Error::NoPayloadCallback);
+					break;
+
+				default:
+					triggerErrorCallback(Error::UnknownPayloadType);
+					break;
+				}
 			}
 			else
 				triggerErrorCallback(Error::UnknownMessageType);
@@ -616,5 +851,143 @@ public:
 
 		// The buffers are free for the next message
 		_messageReceived = false;
+	}
+
+public:
+	/// @brief Create a messenger that sends and receives through a comms
+	/// @param comms The comms, created with its MCU's config. It must outlive the messenger
+	explicit Data_Messenger(Comms &comms) : _comms(comms) {}
+
+	~Data_Messenger()
+	{
+		if (_receivedMessage.twoStepPayloadBuffer != nullptr)
+		{
+			_comms.releasePayloadBuffer(_receivedMessage.twoStepPayloadBuffer);
+			_receivedMessage.twoStepPayloadBuffer = nullptr;
+		}
+	}
+
+	/// @brief Set up the messenger and its comms
+	/// @param receiveCallback Called with each valid message received. Required
+	/// @param receivePayloadCallback Called with each valid payload received.
+	///        Optional: nullptr if payloads aren't expected
+	/// @param errorCallback Called with each error. Optional: nullptr if errors aren't wanted
+	/// @return True if set up, false if there's no receive callback, the comms couldn't be set up, or the payload
+	/// 		buffer couldn't be reserved
+	bool setup(const On_Receive_Callback receiveCallback,
+			   const On_Receive_Payload_Callback receivePayloadCallback = nullptr,
+			   const On_Error_Callback errorCallback = nullptr)
+	{
+		if (receiveCallback == nullptr)
+			return false;
+
+		// The comms is set up first, as it checks everything the buffer below relies on (e.g. PSRAM being fitted)
+		if (!_comms.setup())
+			return false;
+
+		// The CRC follows the payload into the same buffer
+		_receivedMessage.twoStepPayloadBuffer = _comms.reservePayloadBuffer(MAX_TWO_STEP_PAYLOAD_SIZE + CRC32_SIZE);
+		if (_receivedMessage.twoStepPayloadBuffer == nullptr)
+			return false;
+
+		// Anything received while setting up isn't part of a frame
+		_comms.clearRXFIFO();
+
+		_receiveCallback = receiveCallback;
+		_receivePayloadCallback = receivePayloadCallback;
+		_errorCallback = errorCallback;
+
+		// Attached once everything the interrupt uses is set up, so the first frame can be handled
+		_comms.attachReceiveFrameInterrupt(receiveFrameInterrupt, this);
+
+		return true;
+	}
+
+	/// @brief Send a message with no parameters. Returns once every byte has been sent
+	/// @param messageType The message's type
+	/// @return True if sent
+	bool send(const Send_Message_Type messageType)
+	{
+		return send(messageType, nullptr, 0, nullptr, 0, nullptr);
+	}
+
+	/// @brief Send a message with parameters. Returns once every byte has been sent
+	/// @tparam PARAMETER_COUNT Number of parameters, from 1 up to MAX_PARAMETER_COUNT. Inferred from the array
+	/// @param messageType The message's type
+	/// @param parameters The parameters, e.g. { count, enabled, ratio }
+	/// @return True if sent
+	template <uint8_t PARAMETER_COUNT>
+	bool send(const Send_Message_Type messageType, const Parameter (&parameters)[PARAMETER_COUNT])
+	{
+		static_assert(PARAMETER_COUNT <= MAX_PARAMETER_COUNT, "Too many parameters for one message");
+
+		return send(messageType, nullptr, 0, parameters, PARAMETER_COUNT, nullptr);
+	}
+
+	/// @brief Send a message with no parameters in the background. Returns once sending has started; process
+	/// @brief finishes it
+	/// @param messageType The message's type
+	/// @param callback Called from process once every byte has been sent. Required
+	/// @return True if sending started, false if not (e.g. an async send is still in progress)
+	bool sendAsync(const Send_Message_Type messageType, const On_Sent_Callback callback)
+	{
+		return (callback != nullptr) && send(messageType, nullptr, 0, nullptr, 0, callback);
+	}
+
+	/// @brief Send a message with parameters in the background. Returns once sending has started; process
+	/// @brief finishes it. The parameters are packed before this returns, so they can be changed straight away
+	/// @tparam PARAMETER_COUNT Number of parameters, from 1 up to MAX_PARAMETER_COUNT. Inferred from the array
+	/// @param messageType The message's type
+	/// @param parameters The parameters, e.g. { count, enabled, ratio }
+	/// @param callback Called from process once every byte has been sent. Required
+	/// @return True if sending started, false if not (e.g. an async send is still in progress)
+	template <uint8_t PARAMETER_COUNT>
+	bool sendAsync(const Send_Message_Type messageType, const Parameter (&parameters)[PARAMETER_COUNT],
+				   const On_Sent_Callback callback)
+	{
+		static_assert(PARAMETER_COUNT <= MAX_PARAMETER_COUNT, "Too many parameters for one message");
+
+		return (callback != nullptr) && send(messageType, nullptr, 0, parameters, PARAMETER_COUNT, callback);
+	}
+
+	/// @brief Send a payload. Returns once every byte has been sent, so the payload can be changed straight away
+	/// @param messageType The message's type
+	/// @param payload The payload's bytes
+	/// @param payloadSize Number of payload bytes, from 1
+	/// @return True if sent, false if not (e.g. the payload is empty or too big)
+	bool sendPayload(const Send_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
+	{
+		return (payloadSize > 0) && send(messageType, payload, payloadSize, nullptr, 0, nullptr);
+	}
+
+	/// @brief Send a payload in the background. Returns once sending has started; process finishes it
+	/// @param messageType The message's type
+	/// @param payload The payload's bytes. They must stay unchanged until callback is called
+	/// @param payloadSize Number of payload bytes, from 1
+	/// @param callback Called from process once every byte has been sent. Required
+	/// @return True if sending started, false if not (e.g. the payload is empty, or an async send is still in
+	/// 		progress)
+	bool sendPayloadAsync(const Send_Message_Type messageType, const uint8_t *payload,
+						  const uint32_t payloadSize, const On_Sent_Callback callback)
+	{
+		return (payloadSize > 0) && (callback != nullptr) &&
+			   send(messageType, payload, payloadSize, nullptr, 0, callback);
+	}
+
+	/// @brief Process internal events i.e. check for a received message, check if an async send has completed.
+	/// @brief Errors, including an invalid message, are reported through the error callback
+	void process()
+	{
+		// Errors found by the interrupt are reported here, as the callback can't be called from an interrupt.
+		// Note: Errors relate to frames that were rejected, not a message being held, so checking message received still happens
+		if (_lastError != Error::None)
+		{
+			triggerErrorCallback(_lastError);
+			_lastError = Error::None;
+		}
+
+		processSent();
+
+		processReceived();
 	}
 };

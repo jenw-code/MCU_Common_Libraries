@@ -31,6 +31,9 @@ enum class Test_Message_Type : uint8_t
 	AsyncOneStep,
 	AsyncTwoStep,
 	AsyncInProgress,
+	ParametersEveryType,
+	ParametersMost,
+	ParametersAsync,
 	RelayIn,
 	RelayOut,
 	SendTimeMeasurement,
@@ -69,6 +72,9 @@ MessengerClass messengerUnderTest(commsUnderTest);
 
 // The largest payload sent in one step: the 64-byte frame, less the 7-byte header and the 4-byte CRC
 constexpr uint32_t MAX_ONE_STEP_PAYLOAD_SIZE = 64 - (7 + 4);
+
+// The most parameters one message can hold (the messenger's MAX_PARAMETER_COUNT)
+constexpr uint8_t MAX_PARAMETER_COUNT = 8;
 
 // Global, as the largest payload is far too big for the stack
 uint8_t testPayload[MAX_PAYLOAD_SIZE] = {};
@@ -117,11 +123,12 @@ struct Callback_Record final
 	Test_Message_Type messageType = Test_Message_Type::MIN;
 	uint32_t payloadSize = 0;
 	bool payloadValid = false; // The payload matched the pattern, or was nullptr when its size was 0
+	uint8_t parameterCount = 0;
+	bool parametersValid = false; // Matched the parameters sent, or were nullptr when there were none
 	uint32_t errorCount = 0;
 	MessengerClass::Error lastError = MessengerClass::Error::None;
 	uint32_t sentCount = 0;
 	Test_Message_Type sentMessageType = Test_Message_Type::MIN;
-	uint32_t sentPayloadSize = 0;
 	uint32_t sentAtMicros = 0;	  // When the sent callback was called, for timing a whole async send
 	bool relayCopied = false;	  // A RelayIn payload was copied into relayPayload
 	uint32_t relayCopyMicros = 0; // How long the copy took
@@ -129,11 +136,82 @@ struct Callback_Record final
 
 Callback_Record callbackRecord = {};
 
+// The parameters the test under way sent, for the receive callback to check against
+const MessengerClass::Parameter *sentParameters = nullptr;
+uint8_t sentParameterCount = 0;
+
+/// @brief Check two parameters both hold a T, with the same value
+/// @tparam T The value's type: bool, uint8_t, uint16_t, uint32_t or float
+/// @param received The parameter received
+/// @param sent The parameter sent
+/// @return True if both hold a T, with the same value
+template <typename T>
+bool parametersMatchAs(const MessengerClass::Parameter &received, const MessengerClass::Parameter &sent)
+{
+	T receivedValue = {};
+	T sentValue = {};
+	return received.getValue(receivedValue) && sent.getValue(sentValue) && (receivedValue == sentValue);
+}
+
+/// @brief Check a received parameter matches the one sent
+/// @param received The parameter received
+/// @param sent The parameter sent
+/// @return True if they hold the same type and value
+bool parameterMatches(const MessengerClass::Parameter &received, const MessengerClass::Parameter &sent)
+{
+	// A parameter's value type isn't public, so each type is tried
+	return parametersMatchAs<bool>(received, sent) ||
+		   parametersMatchAs<uint8_t>(received, sent) ||
+		   parametersMatchAs<uint16_t>(received, sent) ||
+		   parametersMatchAs<uint32_t>(received, sent) ||
+		   parametersMatchAs<float>(received, sent);
+}
+
+/// @brief Check received parameters match the ones the test sent
+/// @param parameters The parameters received
+/// @param parameterCount Number of parameters received
+/// @return True if there are as many as were sent, and each matches
+bool parametersMatchSent(const MessengerClass::Parameter *parameters, const uint8_t parameterCount)
+{
+	if (parameterCount != sentParameterCount)
+		return false;
+
+	for (uint8_t index = 0; index < parameterCount; ++index)
+	{
+		if (!parameterMatches(parameters[index], sentParameters[index]))
+			return false;
+	}
+
+	return true;
+}
+
 /// @brief Record and print each message received
+/// @param messageType The message's type
+/// @param parameters The parameters, or nullptr when parameterCount is 0
+/// @param parameterCount Number of parameters
+void handleMessengerReceive(const Test_Message_Type messageType, const MessengerClass::Parameter *parameters,
+							const uint8_t parameterCount)
+{
+	++callbackRecord.messageCount;
+	callbackRecord.messageType = messageType;
+	callbackRecord.parameterCount = parameterCount;
+
+	if (parameterCount == 0)
+		callbackRecord.parametersValid = (parameters == nullptr);
+	else
+		callbackRecord.parametersValid = parametersMatchSent(parameters, parameterCount);
+
+	logValue("Messenger received. Message type = ", static_cast<uint8_t>(messageType));
+	logValue("Messenger received. Parameter count = ", parameterCount);
+	logValue("Messenger received. Parameters valid = ", callbackRecord.parametersValid);
+}
+
+/// @brief Record and print each payload received
 /// @param messageType The message's type
 /// @param payload The payload's bytes, or nullptr when payloadSize is 0
 /// @param payloadSize Number of payload bytes
-void handleMessengerReceive(const Test_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
+void handleMessengerReceivePayload(const Test_Message_Type messageType, const uint8_t *payload,
+								   const uint32_t payloadSize)
 {
 	++callbackRecord.messageCount;
 	callbackRecord.messageType = messageType;
@@ -170,19 +248,15 @@ void handleMessengerError(const MessengerClass::Error error)
 
 /// @brief Record and print each async message sent
 /// @param messageType The message's type
-/// @param payload The payload's bytes, or nullptr when payloadSize is 0
-/// @param payloadSize Number of payload bytes
-void handleMessengerSent(const Test_Message_Type messageType, const uint8_t *payload, const uint32_t payloadSize)
+void handleMessengerSent(const Test_Message_Type messageType)
 {
 	// Taken first, so the rest of the callback isn't included in a measured send
 	callbackRecord.sentAtMicros = micros();
 
 	++callbackRecord.sentCount;
 	callbackRecord.sentMessageType = messageType;
-	callbackRecord.sentPayloadSize = payloadSize;
 
 	logValue("Messenger sent. Message type = ", static_cast<uint8_t>(messageType));
-	logValue("Messenger sent. Payload size = ", payloadSize);
 }
 
 //---------------------------------------- TEST HELPERS --------------------------------------------
@@ -190,7 +264,7 @@ void handleMessengerSent(const Test_Message_Type messageType, const uint8_t *pay
 /// @brief Send a message with a patterned payload, and check it's received exactly once, intact, with no errors
 /// @param messenger The messenger, looped back so it receives what it sends
 /// @param messageType The message's type
-/// @param payloadSize Number of payload bytes, up to MAX_PAYLOAD_SIZE. 0 sends a message type only
+/// @param payloadSize Number of payload bytes, from 1 up to MAX_PAYLOAD_SIZE
 /// @return True if the message was sent and received as expected
 bool sendAndCheck(MessengerClass &messenger, const Test_Message_Type messageType, const uint32_t payloadSize)
 {
@@ -199,7 +273,7 @@ bool sendAndCheck(MessengerClass &messenger, const Test_Message_Type messageType
 
 	const uint8_t *payload = (payloadSize > 0) ? testPayload : nullptr;
 
-	const bool sent = messenger.send(messageType, payload, payloadSize);
+	const bool sent = messenger.sendPayload(messageType, payload, payloadSize);
 
 	// send returns once every byte has been sent, so the message has been received by now
 	messenger.process();
@@ -235,7 +309,7 @@ void processUntilAsyncMessageDone(MessengerClass &messenger)
 /// @brief intact, with no errors
 /// @param messenger The messenger, looped back so it receives what it sends
 /// @param messageType The message's type
-/// @param payloadSize Number of payload bytes, up to MAX_PAYLOAD_SIZE. 0 sends a message type only
+/// @param payloadSize Number of payload bytes, from 1 up to MAX_PAYLOAD_SIZE
 /// @return True if the message was sent and received as expected
 bool sendAsyncAndCheck(MessengerClass &messenger, const Test_Message_Type messageType, const uint32_t payloadSize)
 {
@@ -244,14 +318,13 @@ bool sendAsyncAndCheck(MessengerClass &messenger, const Test_Message_Type messag
 
 	const uint8_t *payload = (payloadSize > 0) ? testPayload : nullptr;
 
-	const bool sendStarted = messenger.sendAsync(messageType, payload, payloadSize, handleMessengerSent);
+	const bool sendStarted = messenger.sendPayloadAsync(messageType, payload, payloadSize, handleMessengerSent);
 
 	// sendAsync returns once sending has started, so process finishes it
 	processUntilAsyncMessageDone(messenger);
 
 	const bool sentOnce = (callbackRecord.sentCount == 1);
-	const bool sentMatches = (callbackRecord.sentMessageType == messageType) &&
-							 (callbackRecord.sentPayloadSize == payloadSize);
+	const bool sentMatches = (callbackRecord.sentMessageType == messageType);
 
 	const bool receivedOnce = (callbackRecord.messageCount == 1);
 	const bool messageTypeMatches = (callbackRecord.messageType == messageType);
@@ -294,7 +367,7 @@ void runTest(const char *name, bool (*test)(MessengerClass &), MessengerClass &m
 /// @return True if setup returned false
 bool testSetupWithoutReceiveCallback(MessengerClass &messenger)
 {
-	const bool setUp = messenger.setup(nullptr, handleMessengerError);
+	const bool setUp = messenger.setup(nullptr, handleMessengerReceivePayload, handleMessengerError);
 	return !setUp;
 }
 
@@ -304,18 +377,30 @@ bool testSetupWithoutReceiveCallback(MessengerClass &messenger)
 bool testSendOverMaxPayload(MessengerClass &messenger)
 {
 	// The size is rejected before the payload is read, so the buffer only needs to exist
-	const bool sent = messenger.send(Test_Message_Type::SendOverMaxPayload, testPayload, MAX_PAYLOAD_SIZE + 1);
+	const bool sent = messenger.sendPayload(Test_Message_Type::SendOverMaxPayload, testPayload, MAX_PAYLOAD_SIZE + 1);
 	return !sent;
 }
 
 //---------------------------------- TESTS: NORMAL MESSAGES ----------------------------------------
 
-/// @brief Test 4: a message type with no payload
+/// @brief Test 4: a message type with no parameters
 /// @param messenger The messenger, looped back so it receives what it sends
 /// @return True if received as expected
 bool testMessageTypeOnly(MessengerClass &messenger)
 {
-	return sendAndCheck(messenger, Test_Message_Type::MessageTypeOnly, 0);
+	callbackRecord = {};
+
+	const bool sent = messenger.send(Test_Message_Type::MessageTypeOnly);
+
+	// send returns once every byte has been sent, so the message has been received by now
+	messenger.process();
+
+	const bool receivedOnce = (callbackRecord.messageCount == 1);
+	const bool messageTypeMatches = (callbackRecord.messageType == Test_Message_Type::MessageTypeOnly);
+	const bool noParameters = (callbackRecord.parameterCount == 0) && callbackRecord.parametersValid;
+	const bool noErrors = (callbackRecord.errorCount == 0);
+
+	return sent && receivedOnce && messageTypeMatches && noParameters && noErrors;
 }
 
 /// @brief Test 5: a small one-step payload
@@ -363,7 +448,7 @@ bool testTwoStepLimit(MessengerClass &messenger)
 /// @return True if every message was received as expected
 bool testSeveralInARow(MessengerClass &messenger)
 {
-	constexpr uint32_t PAYLOAD_SIZES[] = {0, 10, MAX_ONE_STEP_PAYLOAD_SIZE, MAX_ONE_STEP_PAYLOAD_SIZE + 1, 1000, 10};
+	constexpr uint32_t PAYLOAD_SIZES[] = {10, MAX_ONE_STEP_PAYLOAD_SIZE, MAX_ONE_STEP_PAYLOAD_SIZE + 1, 1000, 10};
 
 	bool allPassed = true;
 	for (const uint32_t payloadSize : PAYLOAD_SIZES)
@@ -387,8 +472,8 @@ bool testOneStepDropped(MessengerClass &messenger)
 	callbackRecord = {};
 	fillTestPayload(10);
 
-	const bool firstSent = messenger.send(Test_Message_Type::OneStepDropped, testPayload, 10);
-	const bool secondSent = messenger.send(Test_Message_Type::OneStepDropped, testPayload, 10);
+	const bool firstSent = messenger.sendPayload(Test_Message_Type::OneStepDropped, testPayload, 10);
+	const bool secondSent = messenger.sendPayload(Test_Message_Type::OneStepDropped, testPayload, 10);
 
 	messenger.process();
 
@@ -408,8 +493,8 @@ bool testTwoStepDropped(MessengerClass &messenger)
 	callbackRecord = {};
 	fillTestPayload(1000);
 
-	const bool firstSent = messenger.send(Test_Message_Type::TwoStepDropped, testPayload, 10);
-	const bool secondSent = messenger.send(Test_Message_Type::TwoStepDropped, testPayload, 1000);
+	const bool firstSent = messenger.sendPayload(Test_Message_Type::TwoStepDropped, testPayload, 10);
+	const bool secondSent = messenger.sendPayload(Test_Message_Type::TwoStepDropped, testPayload, 1000);
 
 	messenger.process();
 
@@ -439,7 +524,7 @@ bool testUnknownMessageType(MessengerClass &messenger)
 	const uint8_t unknownValue = static_cast<uint8_t>(Test_Message_Type::MAX) + 1;
 	const Test_Message_Type unknownType = static_cast<Test_Message_Type>(unknownValue);
 
-	const bool sent = messenger.send(unknownType, testPayload, 10);
+	const bool sent = messenger.sendPayload(unknownType, testPayload, 10);
 	messenger.process();
 
 	const bool notDelivered = (callbackRecord.messageCount == 0);
@@ -476,19 +561,19 @@ bool testAsyncInProgress(MessengerClass &messenger)
 	callbackRecord = {};
 	fillTestPayload(MAX_PAYLOAD_SIZE);
 
-	const bool firstStarted = messenger.sendAsync(Test_Message_Type::AsyncInProgress, testPayload, MAX_PAYLOAD_SIZE,
+	const bool firstStarted = messenger.sendPayloadAsync(Test_Message_Type::AsyncInProgress, testPayload, MAX_PAYLOAD_SIZE,
 												  handleMessengerSent);
 
 	// Checked straight away, so the sends below are known to be tried while the first is really still sending
 	const bool stillSending = commsUnderTest.sendingBytes();
 
-	const bool sendRejected = !messenger.send(Test_Message_Type::AsyncInProgress, testPayload, 10);
-	const bool sendAsyncRejected = !messenger.sendAsync(Test_Message_Type::AsyncInProgress, testPayload, 10,
+	const bool sendRejected = !messenger.sendPayload(Test_Message_Type::AsyncInProgress, testPayload, 10);
+	const bool sendAsyncRejected = !messenger.sendPayloadAsync(Test_Message_Type::AsyncInProgress, testPayload, 10,
 														handleMessengerSent);
 
 	processUntilAsyncMessageDone(messenger);
 
-	const bool firstSentOnce = (callbackRecord.sentCount == 1) && (callbackRecord.sentPayloadSize == MAX_PAYLOAD_SIZE);
+	const bool firstSentOnce = (callbackRecord.sentCount == 1);
 	const bool firstReceivedOnce = (callbackRecord.messageCount == 1) &&
 								   (callbackRecord.payloadSize == MAX_PAYLOAD_SIZE) && callbackRecord.payloadValid;
 	const bool noErrors = (callbackRecord.errorCount == 0);
@@ -509,7 +594,7 @@ bool testRelay(MessengerClass &messenger)
 	fillTestPayload(MAX_PAYLOAD_SIZE);
 
 	// Plays the vision MCU's message arriving
-	const bool inSent = messenger.send(Test_Message_Type::RelayIn, testPayload, MAX_PAYLOAD_SIZE);
+	const bool inSent = messenger.sendPayload(Test_Message_Type::RelayIn, testPayload, MAX_PAYLOAD_SIZE);
 	messenger.process();
 
 	const bool inReceived = (callbackRecord.messageCount == 1) && callbackRecord.payloadValid;
@@ -521,7 +606,7 @@ bool testRelay(MessengerClass &messenger)
 	callbackRecord = {};
 
 	const uint32_t startMicros = micros();
-	const bool outStarted = messenger.sendAsync(Test_Message_Type::RelayOut, relayPayload, MAX_PAYLOAD_SIZE,
+	const bool outStarted = messenger.sendPayloadAsync(Test_Message_Type::RelayOut, relayPayload, MAX_PAYLOAD_SIZE,
 												handleMessengerSent);
 	const uint32_t sendAsyncMicros = micros() - startMicros;
 
@@ -530,7 +615,7 @@ bool testRelay(MessengerClass &messenger)
 
 	processUntilAsyncMessageDone(messenger);
 
-	const bool outSentOnce = (callbackRecord.sentCount == 1) && (callbackRecord.sentPayloadSize == MAX_PAYLOAD_SIZE);
+	const bool outSentOnce = (callbackRecord.sentCount == 1);
 	const bool outReceivedOnce = (callbackRecord.messageCount == 1) &&
 								 (callbackRecord.messageType == Test_Message_Type::RelayOut) &&
 								 (callbackRecord.payloadSize == MAX_PAYLOAD_SIZE) && callbackRecord.payloadValid;
@@ -550,7 +635,181 @@ bool testRelay(MessengerClass &messenger)
 		   outStarted && stillSending && outSentOnce && outReceivedOnce && outNoErrors;
 }
 
+//---------------------------------------- TESTS: PARAMETERS ---------------------------------------
+
+/// @brief Send a message with parameters, and check it's received exactly once, intact, with no errors
+/// @tparam PARAMETER_COUNT Number of parameters. Inferred from the array
+/// @param messenger The messenger, looped back so it receives what it sends
+/// @param messageType The message's type
+/// @param parameters The parameters
+/// @return True if the message was sent and received as expected
+template <uint8_t PARAMETER_COUNT>
+bool sendParametersAndCheck(MessengerClass &messenger, const Test_Message_Type messageType,
+							const MessengerClass::Parameter (&parameters)[PARAMETER_COUNT])
+{
+	callbackRecord = {};
+	sentParameters = parameters;
+	sentParameterCount = PARAMETER_COUNT;
+
+	const bool sent = messenger.send(messageType, parameters);
+
+	// send returns once every byte has been sent, so the message has been received by now
+	messenger.process();
+
+	const bool receivedOnce = (callbackRecord.messageCount == 1);
+	const bool messageTypeMatches = (callbackRecord.messageType == messageType);
+	const bool parametersMatch = (callbackRecord.parameterCount == PARAMETER_COUNT) && callbackRecord.parametersValid;
+	const bool noErrors = (callbackRecord.errorCount == 0);
+
+	return sent && receivedOnce && messageTypeMatches && parametersMatch && noErrors;
+}
+
+/// @brief Test 21: one parameter of every value type, each at a value that uses its whole size, and a negative
+/// @brief float so its sign bit is sent
+/// @param messenger The messenger, looped back so it receives what it sends
+/// @return True if received as expected
+bool testParametersEveryType(MessengerClass &messenger)
+{
+	const MessengerClass::Parameter parameters[] = {true, uint8_t(200), uint16_t(60000), uint32_t(4000000000),
+													-3.25f};
+
+	return sendParametersAndCheck(messenger, Test_Message_Type::ParametersEveryType, parameters);
+}
+
+/// @brief Test 22: the most parameters a message can hold, each of the largest value type
+/// @param messenger The messenger, looped back so it receives what it sends
+/// @return True if received as expected
+bool testParametersMost(MessengerClass &messenger)
+{
+	// Sized by MAX_PARAMETER_COUNT, so a different count fails to compile
+	const MessengerClass::Parameter parameters[MAX_PARAMETER_COUNT] = {
+		uint32_t(0x01020304), uint32_t(0x05060708), uint32_t(0x090A0B0C), uint32_t(0x0D0E0F10),
+		uint32_t(0x11121314), uint32_t(0x15161718), uint32_t(0x191A1B1C), uint32_t(0x1D1E1F20)};
+
+	return sendParametersAndCheck(messenger, Test_Message_Type::ParametersMost, parameters);
+}
+
+/// @brief Test 23: an async message with parameters
+/// @param messenger The messenger, looped back so it receives what it sends
+/// @return True if sent and received as expected
+bool testParametersAsync(MessengerClass &messenger)
+{
+	// The array is sized by it, so a different count fails to compile
+	constexpr uint8_t PARAMETER_COUNT = 3;
+	const MessengerClass::Parameter parameters[PARAMETER_COUNT] = {uint8_t(5), true, 0.22f};
+
+	callbackRecord = {};
+	sentParameters = parameters;
+	sentParameterCount = PARAMETER_COUNT;
+
+	const bool sendStarted = messenger.sendAsync(Test_Message_Type::ParametersAsync, parameters,
+												 handleMessengerSent);
+
+	// sendAsync returns once sending has started, so process finishes it
+	processUntilAsyncMessageDone(messenger);
+
+	const bool sentOnce = (callbackRecord.sentCount == 1);
+	const bool sentMatches = (callbackRecord.sentMessageType == Test_Message_Type::ParametersAsync);
+
+	const bool receivedOnce = (callbackRecord.messageCount == 1);
+	const bool messageTypeMatches = (callbackRecord.messageType == Test_Message_Type::ParametersAsync);
+	const bool parametersMatch = (callbackRecord.parameterCount == PARAMETER_COUNT) && callbackRecord.parametersValid;
+	const bool noErrors = (callbackRecord.errorCount == 0);
+
+	return sendStarted && sentOnce && sentMatches &&
+		   receivedOnce && messageTypeMatches && parametersMatch && noErrors;
+}
+
 //-------------------------------------------- PERFORMANCE -----------------------------------------
+
+/// @brief How long sending one parameterised message took
+struct Parameter_Send_Times final
+{
+	uint32_t sendMicros = 0;			// How long send took to return
+	uint32_t sendAsyncMicros = 0;		// How long sendAsync took to return
+	uint32_t sendAsyncToSentMicros = 0; // From calling sendAsync to its sent callback
+};
+
+/// @brief Measure how long send and sendAsync take for a message with parameters
+/// @tparam PARAMETER_COUNT Number of parameters. Inferred from the array
+/// @param messenger The messenger, set up and looped back
+/// @param parameters The parameters
+/// @return The times
+template <uint8_t PARAMETER_COUNT>
+Parameter_Send_Times measureParameterSendTimes(MessengerClass &messenger,
+											   const MessengerClass::Parameter (&parameters)[PARAMETER_COUNT])
+{
+	Parameter_Send_Times times;
+
+	// Kept current, so the receive callback checks against these parameters
+	sentParameters = parameters;
+	sentParameterCount = PARAMETER_COUNT;
+
+	const uint32_t sendStartMicros = micros();
+	messenger.send(Test_Message_Type::SendTimeMeasurement, parameters);
+	times.sendMicros = micros() - sendStartMicros;
+
+	// Handled before the next send, so the next message isn't dropped
+	messenger.process();
+
+	callbackRecord = {};
+
+	const uint32_t sendAsyncStartMicros = micros();
+	messenger.sendAsync(Test_Message_Type::SendTimeMeasurement, parameters, handleMessengerSent);
+	times.sendAsyncMicros = micros() - sendAsyncStartMicros;
+
+	// Finished before the next send, as a send is rejected while an async one is in progress
+	processUntilAsyncMessageDone(messenger);
+	times.sendAsyncToSentMicros = callbackRecord.sentAtMicros - sendAsyncStartMicros;
+
+	return times;
+}
+
+/// @brief Measure how long send and sendAsync take for a message with no parameters
+/// @param messenger The messenger, set up and looped back
+/// @return The times
+Parameter_Send_Times measureNoParameterSendTimes(MessengerClass &messenger)
+{
+	Parameter_Send_Times times;
+
+	// Kept current, so the receive callback checks against no parameters
+	sentParameters = nullptr;
+	sentParameterCount = 0;
+
+	const uint32_t sendStartMicros = micros();
+	messenger.send(Test_Message_Type::SendTimeMeasurement);
+	times.sendMicros = micros() - sendStartMicros;
+
+	// Handled before the next send, so the next message isn't dropped
+	messenger.process();
+
+	callbackRecord = {};
+
+	const uint32_t sendAsyncStartMicros = micros();
+	messenger.sendAsync(Test_Message_Type::SendTimeMeasurement, handleMessengerSent);
+	times.sendAsyncMicros = micros() - sendAsyncStartMicros;
+
+	// Finished before the next send, as a send is rejected while an async one is in progress
+	processUntilAsyncMessageDone(messenger);
+	times.sendAsyncToSentMicros = callbackRecord.sentAtMicros - sendAsyncStartMicros;
+
+	return times;
+}
+
+/// @brief Print the times for one parameterised message
+/// @param parameterCount Number of parameters the message had
+/// @param times The times
+void printParameterSendTimes(const uint8_t parameterCount, const Parameter_Send_Times &times)
+{
+	Serial.print(parameterCount);
+	Serial.print(" parameters: send ");
+	Serial.print(times.sendMicros);
+	Serial.print(" us, sendAsync ");
+	Serial.print(times.sendAsyncMicros);
+	Serial.print(" us, sendAsync to sent ");
+	Serial.print(times.sendAsyncToSentMicros);
+	Serial.println(" us");
+}
 
 /// @brief Measure how long send and sendAsync take to return for one-step and two-step messages, and print the
 /// @brief results. Printed with Serial directly, so it works with APP_DEBUG at 0, which keeps the messenger's
@@ -558,7 +817,7 @@ bool testRelay(MessengerClass &messenger)
 /// @param messenger The messenger, set up and looped back
 void measureSendTimes(MessengerClass &messenger)
 {
-	constexpr uint32_t PAYLOAD_SIZES[] = {0, 10, MAX_ONE_STEP_PAYLOAD_SIZE, MAX_ONE_STEP_PAYLOAD_SIZE + 1, 1000,
+	constexpr uint32_t PAYLOAD_SIZES[] = {10, MAX_ONE_STEP_PAYLOAD_SIZE, MAX_ONE_STEP_PAYLOAD_SIZE + 1, 1000,
 										  MAX_PAYLOAD_SIZE};
 	constexpr uint8_t MEASUREMENT_COUNT = sizeof(PAYLOAD_SIZES) / sizeof(PAYLOAD_SIZES[0]);
 
@@ -571,7 +830,7 @@ void measureSendTimes(MessengerClass &messenger)
 		fillTestPayload(PAYLOAD_SIZES[index]);
 
 		const uint32_t sendStartMicros = micros();
-		messenger.send(Test_Message_Type::SendTimeMeasurement, testPayload, PAYLOAD_SIZES[index]);
+		messenger.sendPayload(Test_Message_Type::SendTimeMeasurement, testPayload, PAYLOAD_SIZES[index]);
 		sendMicros[index] = micros() - sendStartMicros;
 
 		// Handled before the next send, so the next message isn't dropped
@@ -580,7 +839,7 @@ void measureSendTimes(MessengerClass &messenger)
 		callbackRecord = {};
 
 		const uint32_t sendAsyncStartMicros = micros();
-		messenger.sendAsync(Test_Message_Type::SendTimeMeasurement, testPayload, PAYLOAD_SIZES[index],
+		messenger.sendPayloadAsync(Test_Message_Type::SendTimeMeasurement, testPayload, PAYLOAD_SIZES[index],
 							handleMessengerSent);
 		sendAsyncMicros[index] = micros() - sendAsyncStartMicros;
 
@@ -588,6 +847,16 @@ void measureSendTimes(MessengerClass &messenger)
 		processUntilAsyncMessageDone(messenger);
 		sendAsyncToSentMicros[index] = callbackRecord.sentAtMicros - sendAsyncStartMicros;
 	}
+
+	// The smallest parameterised message, one parameter, and the largest
+	const MessengerClass::Parameter oneParameter[] = {uint8_t(5)};
+	const MessengerClass::Parameter mostParameters[MAX_PARAMETER_COUNT] = {
+		uint32_t(0x01020304), uint32_t(0x05060708), uint32_t(0x090A0B0C), uint32_t(0x0D0E0F10),
+		uint32_t(0x11121314), uint32_t(0x15161718), uint32_t(0x191A1B1C), uint32_t(0x1D1E1F20)};
+
+	const Parameter_Send_Times noParameterTimes = measureNoParameterSendTimes(messenger);
+	const Parameter_Send_Times oneParameterTimes = measureParameterSendTimes(messenger, oneParameter);
+	const Parameter_Send_Times mostParameterTimes = measureParameterSendTimes(messenger, mostParameters);
 
 	// Printed after all the sends, so printing can't affect any of the times
 	Serial.println();
@@ -603,6 +872,10 @@ void measureSendTimes(MessengerClass &messenger)
 		Serial.print(sendAsyncToSentMicros[index]);
 		Serial.println(" us");
 	}
+
+	printParameterSendTimes(0, noParameterTimes);
+	printParameterSendTimes(1, oneParameterTimes);
+	printParameterSendTimes(MAX_PARAMETER_COUNT, mostParameterTimes);
 }
 
 void testMessenger()
@@ -613,7 +886,8 @@ void testMessenger()
 	runTest("Test 3: send over the largest payload", testSendOverMaxPayload, messengerUnderTest);
 
 	const uint32_t setupStartMicros = micros();
-	const bool messengerSetup = messengerUnderTest.setup(handleMessengerReceive, handleMessengerError);
+	const bool messengerSetup = messengerUnderTest.setup(handleMessengerReceive, handleMessengerReceivePayload,
+														 handleMessengerError);
 	const uint32_t setupMicros = micros() - setupStartMicros;
 	// Printed with Serial directly, so they show with APP_DEBUG at 0
 	if (messengerSetup)
@@ -655,6 +929,12 @@ void testMessenger()
 		logStr("");
 		logStr("---- Relay ----");
 		runTest("Test 20: relay a large message", testRelay, messengerUnderTest);
+
+		logStr("");
+		logStr("---- Parameters ----");
+		runTest("Test 21: every value type", testParametersEveryType, messengerUnderTest);
+		runTest("Test 22: the most parameters", testParametersMost, messengerUnderTest);
+		runTest("Test 23: async with parameters", testParametersAsync, messengerUnderTest);
 
 		measureSendTimes(messengerUnderTest);
 	}
