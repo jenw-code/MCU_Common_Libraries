@@ -20,7 +20,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 12. **If the code relies on something, validate it.** A comment isn't a safeguard. `static_assert` at compile time, otherwise a runtime check. Better still, design the assumption out.
 13. **Where a validation goes:** next to the shared declaration if several functions rely on it, otherwise first in the function that relies on it. Never act and then check. Validate once, at the entry point; don't guard what's already guaranteed.
 14. **Never do work that can't ever be used.**
-15. **Don't be lazy with headers.** Every function documents every `@param` and `@tparam` (what it is, units, range), whatever its scope.
+15. **Don't be lazy with headers.** Every function documents every `@param` and `@tparam` (what it is, units, range), whatever its scope. The exception is a set of overloads whose signatures already say everything (e.g. one constructor per value type): a single comment above the set gives their shared purpose, which is more useful than a header on each.
 16. **The code's shape mirrors its intent.** Write it the way you'd explain it: "if the CRC is wrong, report it; otherwise, if the type is unknown, report that; otherwise, deliver the message" becomes exactly that chain. If the code's shape tells a different story (for example, working out every check up front when the first failure stops everything), the intent is lost, however correct the result. Where the code can't easily show its intent, a comment states it. Show the logic clearly even where it may be disagreed with: clear logic can be discussed and corrected, but hidden logic can't.
 17. **On mirrors off.** Paired actions (setup and teardown, start and stop) mirror each other: whatever state one sets, the other clears, and in the matching place. A value set on the way in but left alone on the way out reads as an oversight.
 18. **The same kind of work happens at the same level.** If the public functions update shared state, the helpers don't update any of it (and vice versa). Consistency gives each function a clear definition of what it does.
@@ -81,6 +81,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **A class's name and doc say what it's for, and what it can't be used for.** Ask "what would someone assume from this?".
 
 ### Comments and headers
+- **KCSS: keep comments simple, stupid.** A comment must be understood on first reading. Say what the reader needs and stop: "T must be the same type as the parameter value", not a sentence about union members and how values are given. Explaining why something can't happen, when "this should never be reached" says it, only adds words to check.
 - **A detail that's defined once in code isn't repeated in comments.** For example, once a constant says which level means "active", comments elsewhere don't mention levels; otherwise they go stale when the detail changes.
 - **Don't make a comment more specific than its intent needs.** Naming the exact function or detail that relies on a line makes the comment go out of date, or mislead, as soon as the code changes a little. Give the general purpose, with a current use as an example: "Kept to aid in sending data (e.g. used to check when sending has completed)". It names no functions, and the "e.g." shows a use without limiting the value to it, so the comment stays true as uses are added. A comment so general that it only states the obvious ("needed after setup") is pointless.
 - **A comment must read one way only.** A clipped opening such as "Last, so…" can be read as narration ("and lastly") rather than as the reason. State the reason in full: "Attached once everything it uses is set up, so…".
@@ -89,7 +90,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Keep chunks of meaning together.** Break lines between ideas, not mid-idea. Don't wrap a short example; only wrap a very long one.
 - **A function's header gives its purpose, not its mechanism.** Say what it's for ("tell the receiver a frame is about to be sent"), not how it does it ("lower the line"). The code shows the how.
 - **Calculation functions give an example** of an input and its output in their header.
-- **An explanatory comment goes above the line**, not as a side note, and leads with the intent.
+- **An explanatory comment goes above the line**, not as a side note, and leads with the intent. A short side note is fine where the code is self-explanatory and the note only adds a detail (e.g. `return false; // Unknown, or not a value type`).
 - **Identical lines get identical comments.**
 - **A very pertinent, subtle point starts with "Note:"** to draw the developer's eye to it. Kept for those points only, so it keeps its weight.
 - **Code doesn't explain the schematic.** Circuit details, such as an external pull-up on a pin, belong in the hardware design, not in comments on the code that uses them.
@@ -102,6 +103,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **A value used once, whose name adds nothing, goes straight into the call.** Declaring it first hides that it's used only once. Name it only when the name explains something the expression doesn't.
 - **An early `return` is for a failure or guard.** When two branches are both normal outcomes, use `if`/`else`, so neither reads as an error.
 - **Never `while (true)`.** Put the real condition in the `while`.
+- **Write for intent, not for current use.** Code is transient: what's private or unused today may not be tomorrow. A qualifier such as `const` states what must stay true, so it stays even where nothing currently breaks it.
 - **Write code the way the task is thought of.** Nobody thinks of packing a value as a loop: it's putting each byte in its place. So a small, fixed number of steps that won't change is written out, one line each. A loop adds a mechanism the intent doesn't have.
 - **Where a line sits shows intent.** A line inside a loop says it may change on each pass, so anything that stays the same for the whole loop goes before it.
 - **Wrap ring indexes with increment-and-if, not modulo**, as modulo is slow on 8-bit MCUs. The exception is a compile-time constant divisor, which the compiler optimises.
@@ -141,6 +143,7 @@ The coding standards Claude works to on every project: the standing rules, follo
 - **Keep one goal, and judge every decision against it.** Don't add complexity for a goal that isn't wanted, such as genericity nobody needs.
 
 ### Validation and failure
+- **A fundamental limitation gets an explicit check where it applies,** even if other logic currently stops it being reached. A simple change elsewhere can break the chain that keeps it safe, and the check shows the developer the rule (e.g. parameters can't be sent in two steps).
 - **Setup requirements are validated in `begin`**, so a developer can see everything the setup needs in one place, and no check runs on every read.
 - **A crash on a setup error is better than code that quietly carries on.** Don't add per-call checks to protect against a developer's incorrect setup.
 - **A `bool` return that can never be false gives the caller nothing:** make it `void`.
