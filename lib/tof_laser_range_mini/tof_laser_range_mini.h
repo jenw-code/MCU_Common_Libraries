@@ -25,8 +25,8 @@ public:
 		uint8_t id = 0;				 // id: Node ID
 		uint32_t systemTime = 0;	 // System_time: Node system time, since the device powered up (ms)
 		uint32_t distance = 0;		 // dis: Distance (mm)
-		uint8_t distanceStatus = 0;	 // dis_status: Distance status
-		uint16_t signalStrength = 0; // signal_strength: Signal strength
+		uint8_t distanceStatus = 0;	 // dis_status: Distance reading reliability. 1 = Good, 0 = Poor
+		uint16_t signalStrength = 0; // signal_strength: The strength of the signal returned. 100 = Full signal, 0 = No signal
 		uint8_t rangePrecision = 0;	 // range_precision: Range precision
 	};
 
@@ -493,6 +493,15 @@ protected:
 		return writeBytes(request, READ_FRAME0_SIZE);
 	}
 
+	/// @brief Returns true if the measurement is trustworthy
+	/// @param measurement The measurement
+	/// @return True if trustworthy
+	bool measurementIsTrustworthy(const Measurement &measurement) const
+	{
+		return (measurement.distanceStatus > 0) &&
+			   (measurement.signalStrength > 50);
+	}
+
 	/// @brief Initialise the output mode and refresh rate from the device. The device keeps its settings, so
 	/// @brief they may not be the ones it was supplied with
 	/// @return True if the device's settings were read
@@ -705,7 +714,7 @@ public:
 		_alertChecker.lastCheckMillis = millis();
 
 		Measurement measurement;
-		if (readMeasurement(measurement))
+		if (readMeasurement(measurement) && measurementIsTrustworthy(measurement))
 		{
 			// Only trigger alert when it's not active and first breaches threshold
 			// Also clear alert when its condition no longer breaches threshold
@@ -741,5 +750,20 @@ public:
 	Alert ActiveAlert() const
 	{
 		return _activeAlert;
+	}
+
+	/// @brief Get the latest distance
+	/// @param distance The distance to update
+	/// @return True if successfully read
+	bool getDistance(uint32_t &distance)
+	{
+		Measurement measurement;
+		if (readMeasurement(measurement) && measurementIsTrustworthy(measurement))
+		{
+			distance = measurement.distance;
+			return true;
+		}
+
+		return false;
 	}
 };
