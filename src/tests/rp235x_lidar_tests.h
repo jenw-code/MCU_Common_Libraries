@@ -72,6 +72,13 @@ void checkLidar()
 	if (lidar1 != nullptr)
 	{
 		lidar1->checkAlerts();
+
+		uint32_t d;
+		if (lidar1->getDistance(d))
+		{
+			logValue("d = ", d);
+			delay(2000);
+		}
 	}
 
 	// Well under the auto-checker's 200 ms interval, so checkDistance runs each time its timer asks
